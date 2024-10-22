@@ -6,3 +6,4 @@ outputs/
 *.png
 taming/
 results*
+__pycache__

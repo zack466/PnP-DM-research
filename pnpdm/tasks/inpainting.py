@@ -13,6 +13,9 @@ class Inpainting(LinearOperator):
     def display_name(self):
         return 'inpainting'
 
+    def proximal_generator(self, x, y, sigma, rho):
+        pass
+
     def forward(self, x, **kwargs):
         pass
 

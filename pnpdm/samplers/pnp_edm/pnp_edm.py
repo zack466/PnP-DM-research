@@ -4,6 +4,7 @@ import matplotlib.pyplot as plt
 from tqdm import tqdm
 from collections import defaultdict
 from .denoiser_edm import Denoiser_EDM
+from .denoiser_latent_edm import DenoiserLatentEDM
 
 class PnPEDM:
     def __init__(self, config, model, operator, noiser, device):
@@ -28,6 +29,9 @@ class PnPEDM:
             self.edm = Denoiser_EDM(model, device, **config.common_kwargs, **config.iddpm_kwargs, mode='sde')
         elif config.mode == 'edm_sde':
             self.edm = Denoiser_EDM(model, device, **config.common_kwargs, **config.edm_kwargs, mode='sde')
+        elif config.mode == 'latent_sde':
+            self.edm = DenoiserLatentEDM(device, self.config.rho)
+        
         else:
             raise NotImplementedError(f"Mode {self.config.mode} is not implemented.")
 
@@ -74,7 +78,7 @@ class PnPEDM:
 
             # likelihood step
             z = self.operator.proximal_generator(x, y_n, self.noiser.sigma, rho_iter)
-
+        
             # prior step
             x = self.edm(z, rho_iter)
 

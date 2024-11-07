@@ -1,18 +1,3 @@
-from diffusers.pipelines.pipeline_utils import DiffusionPipeline
-
-class DenoiserLatentEDM(DiffusionPipeline):
-
-    def __init__(self):
-        pass
-        # Get config from some file
-        # Run latent step
-
-    def __call__(self, **kwargs):
-        pass
-        # Copy DiffusionPipelines' __call__ but with preconditioning stuff :(
-
-# TODO
-
 # https://huggingface.co/stable-diffusion-v1-5/stable-diffusion-v1-5/tree/main
 # - See files and versions, see json configs about architectures about UNet/VAE/Encoder
 # - All these thigns we need to load to our repo
@@ -36,3 +21,86 @@ class DenoiserLatentEDM(DiffusionPipeline):
 
 # preconditionng on unet
 # [for loop} replace with algorhtm 3
+from diffusers import StableDiffusionPipeline
+import torch
+import numpy as np
+
+class DenoiserLatentEDM:
+    def __init__(self, device, rho):
+        super().__init__()  
+        self.device = device 
+
+        #loading in diffusion model
+        self.pipeline = StableDiffusionPipeline.from_pretrained("stable-diffusion-v1-5/stable-diffusion-v1-5")
+        self.unet = self.pipeline.unet.to(device) 
+        self.vae = self.pipeline.vae.to(device)  
+
+        #loading in edm parameters
+        self.rho = 7
+        self.tokenizer = self.pipeline.tokenizer
+        self.text_encoder = self.pipeline.text_encoder.to(self.device)  
+        self.sigma_min = 0.002
+        self.sigma_max = 80
+        self.num_steps = 100
+        self.sigma = lambda t: t
+        self.sigma_deriv = lambda t: 1
+        self.sigma_inv = lambda sigma: sigma
+        self.s = lambda t: 1
+        self.s_deriv = lambda t: 0
+        step_indices = torch.arange(self.num_steps, dtype=torch.float64, device=self.device)  
+        sigma_steps = (self.sigma_max ** (1 / rho) + (step_indices / (self.num_steps - 1)) * 
+                      (self.sigma_min ** (1 / rho) - self.sigma_max ** (1 / rho))) ** rho
+        t_steps = self.sigma_inv(torch.as_tensor(sigma_steps))
+        self.t_steps = torch.cat([t_steps, torch.zeros_like(t_steps[:1])]).to(self.device)  
+        
+    
+    def __call__(self, x_noisy, eta):
+        i_start = torch.min(torch.nonzero(self.sigma(self.t_steps) < eta))  # Find the smallest t such that sigma(t) < eta
+
+        # Main sampling loop (starting from t_start with state initialized at x_noisy)
+        x_next = x_noisy * self.s(self.t_steps[i_start])
+        
+        # switch to latent space 
+        x_cur_latent = self.vae.encode(x_noisy / self.s(self.t_steps[i_start])).latent_dist.sample()
+
+        for i, (t_cur, t_next) in enumerate(zip(self.t_steps[:-1], self.t_steps[1:])):  # 0, ..., N-1
+            if i < i_start:
+                continue  # Skip the steps before i_start
+
+            # Euler step
+            lmbd = 2
+            sigma_cur = self.sigma(t_cur)
+
+            prompt = "closeup face of a young asian child"
+            text_inputs = self.tokenizer(prompt, return_tensors="pt").to(self.device)
+            encoder_hidden_states = self.text_encoder(**text_inputs).last_hidden_state
+
+            with torch.no_grad():  
+                
+                c_skip = (0.25) / (sigma_cur ** 2 + 0.25)
+                c_out = (0.5 * sigma_cur) / (0.25 + sigma_cur ** 2).sqrt()
+                c_in = 1 / (sigma_cur ** 2 + 0.25).sqrt()
+                c_noise = 0.25 * np.log(torch.as_tensor(sigma_cur.cpu())) 
+                c_noise = c_noise.to(sigma_cur.device)
+                model_output = self.unet((c_in * x_cur_latent).to(torch.float32), c_noise.flatten(), encoder_hidden_states)
+                model_output = model_output.sample.to(torch.float32)
+                assert model_output.dtype == torch.float32
+                denoised = c_skip * x_cur_latent + c_out * model_output.to(torch.float32)
+
+                d_cur = (lmbd * self.sigma_deriv(t_cur) / sigma_cur + self.s_deriv(t_cur) / self.s(t_cur)) * x_cur_latent - \
+                     lmbd * self.sigma_deriv(t_cur) * self.s(t_cur) / sigma_cur * denoised 
+                x_next_latent = x_cur_latent + (t_next - t_cur) * d_cur
+
+                # Update
+                if i != self.num_steps - 1:
+                    n_cur = self.s(t_cur) * torch.sqrt(2 * self.sigma_deriv(t_cur) * sigma_cur) * torch.randn_like(x_cur_latent)
+                    x_next_latent += torch.sqrt(t_cur - t_next) * n_cur
+
+            del denoised, d_cur, encoder_hidden_states 
+            torch.cuda.empty_cache()
+
+            with torch.no_grad():
+                x_next = self.vae.decode(x_next_latent).sample
+
+        return x_next
+

@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 from tqdm import tqdm
 from collections import defaultdict
 from .denoiser_edm import Denoiser_EDM
-from .denoiser_latent_edm import DenoiserLatentEDM
+from .denoiser_latent_edm import Denoiser_EDM_Latent
 
 class PnPEDM:
     def __init__(self, config, model, operator, noiser, device):
@@ -30,8 +30,7 @@ class PnPEDM:
         elif config.mode == 'edm_sde':
             self.edm = Denoiser_EDM(model, device, **config.common_kwargs, **config.edm_kwargs, mode='sde')
         elif config.mode == 'latent_sde':
-            self.edm = DenoiserLatentEDM(device, self.config.rho)
-        
+            self.edm = Denoiser_EDM_Latent(model, device, **config.common_kwargs, **config.edm_kwargs, mode='sde')
         else:
             raise NotImplementedError(f"Mode {self.config.mode} is not implemented.")
 
@@ -95,6 +94,9 @@ class PnPEDM:
             if i % (self.config.num_iters//10) == 0:
                 xs_save = torch.cat((xs_save, x_save), dim=-1)
                 zs_save = torch.cat((zs_save, z_save), dim=-1)
+
+            # plt.imsave(os.path.join(save_root, 'progress', fname+f"x-{i}.png"), x_save.permute(0, 2, 3, 1).squeeze().cpu().numpy(), cmap=cmap)
+            # plt.imsave(os.path.join(save_root, 'progress', fname+f"z-{i}.png"), z_save.permute(0, 2, 3, 1).squeeze().cpu().numpy(), cmap=cmap)
             
             if record:
                 log["x"].append(x_save.permute(0, 2, 3, 1).squeeze().cpu().numpy())

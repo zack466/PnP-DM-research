@@ -73,11 +73,17 @@ class StableDiffusionPrecond:
         return c_skip * x_noisy + c_out * self.unet(x_noisy * c_in, c_noise, self.encoder_hidden_states).sample.to(torch.float32)
 
     def sigma(self, t):
-        return torch.sqrt((1 - self.alphas_cumprod[int(t)]) / self.alphas_cumprod[int(t)])
+        return torch.sqrt((1 - self.alphas_cumprod[int(t)]))
 
     def sigma_inv(self, sigma):
-        t = torch.min(torch.nonzero(self.alphas_cumprod < sigma))
-        return torch.as_tensor(t)
+        best_dist = 1e9
+        best_t = None
+        for t in range(len(self.alphas_cumprod)):
+            s = self.sigma(t)
+            if torch.abs(s - sigma) < best_dist:
+                best_dist = torch.abs(s - sigma)
+                best_t = t
+        return best_t
 
     def round_sigma(self, sigma):
         return torch.as_tensor(sigma)

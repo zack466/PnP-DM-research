@@ -25,20 +25,11 @@ from diffusers import StableDiffusionPipeline
 import torch
 import numpy as np
 from torchvision.utils import save_image
+from torchvision.io import read_image
 
 
 class StableDiffusionPrecond:
-    def __init__(self, device,
-                 beta_d=19.9,
-                 beta_min=0.00085,
-                 M=1000,
-                 epsilon_t=1e-3,
-                 **kwargs):
-
-        self.beta_d = beta_d
-        self.beta_min = beta_min
-        self.M = M
-        self.epsilon_t = epsilon_t
+    def __init__(self, device, **kwargs):
 
         self.device = device
 
@@ -53,37 +44,40 @@ class StableDiffusionPrecond:
         self.alphas = 1.0 - self.pipeline.scheduler.betas
         self.alphas_cumprod = torch.cumprod(self.alphas, dim=0).to(self.device)
 
-        # text encoding
-        prompt = "closeup face of a young asian child"
-        text_inputs = self.tokenizer(
-            prompt, return_tensors="pt").to(self.device)
-        self.encoder_hidden_states = self.text_encoder(
-            **text_inputs).last_hidden_state
-
-        self.sigma_min = float(self.sigma(epsilon_t))
-        self.sigma_max = float(self.sigma(self.M - 1))
+        # text encoding?
+        prompt = ["a young asian child in the sun"]
+        text_input = self.tokenizer(prompt, padding="max_length", max_length=self.tokenizer.model_max_length, truncation=True, return_tensors="pt")
+        text_embeddings = self.text_encoder(text_input.input_ids.to(self.device))[0]
+        max_length = text_input.input_ids.shape[-1]
+        uncond_input = self.tokenizer([""], padding="max_length", max_length=max_length, return_tensors="pt")
+        uncond_embeddings = self.text_encoder(uncond_input.input_ids.to(self.device))[0]
+        self.encoder_hidden_states = torch.cat([uncond_embeddings, text_embeddings])
 
     def __call__(self, x_noisy, sigma):
         # ???
-        c_skip = 1
-        c_out = -1
-        c_in = 1
-        c_noise = self.sigma_inv(sigma)
+        t = self.sigma_inv(sigma)
 
-        return c_skip * x_noisy + c_out * self.unet(x_noisy * c_in, c_noise, self.encoder_hidden_states).sample.to(torch.float32)
+        c_skip = 1/torch.sqrt(self.alphas_cumprod[t])
+        c_out = -1/torch.sqrt(self.alphas_cumprod[t])
+        c_in = 1
+        c_noise = t
+        print("t =", c_noise)
+
+        with torch.no_grad():
+            latent_model_input = torch.cat([x_noisy] * 2)
+            unet_out = self.unet(latent_model_input * c_in, c_noise, self.encoder_hidden_states).sample
+
+        # hopefully classifier free guidance
+        noise_pred_uncond, noise_pred_text = unet_out.chunk(2)
+        F = noise_pred_uncond + 7.5 * (noise_pred_text - noise_pred_uncond)
+        return c_skip * x_noisy + c_out * F
 
     def sigma(self, t):
-        return torch.sqrt((1 - self.alphas_cumprod[int(t)]))
+        return torch.sqrt(1 - self.alphas_cumprod[t])
 
     def sigma_inv(self, sigma):
-        best_dist = 1e9
-        best_t = None
-        for t in range(len(self.alphas_cumprod)):
-            s = self.sigma(t)
-            if torch.abs(s - sigma) < best_dist:
-                best_dist = torch.abs(s - sigma)
-                best_t = t
-        return best_t
+        all_sigma = self.sigma(torch.arange(len(self.alphas)))
+        return torch.argmin(torch.abs(all_sigma - sigma))
 
     def round_sigma(self, sigma):
         return torch.as_tensor(sigma)
@@ -91,24 +85,25 @@ class StableDiffusionPrecond:
 
 class Denoiser_EDM_Latent():
     def __init__(
-        self, 
-        device, 
-        num_steps=18, 
-        sigma_min=None, 
-        sigma_max=None, 
-        rho=7, 
-        solver='euler', 
-        discretization='edm', 
-        schedule='linear', 
-        scaling='none', 
-        epsilon_s=1e-3, 
-        C_1=0.001, 
-        C_2=0.008, 
-        M=1000, 
-        alpha=1, 
-        S_churn=0, 
-        S_min=0, 
-        S_max=float('inf'), 
+        self,
+        model_throwaway,
+        device,
+        num_steps=200,
+        sigma_min=0,
+        sigma_max=1,
+        rho=7,
+        solver='euler',
+        discretization='vp',
+        schedule='linear',
+        scaling='none',
+        epsilon_s=1e-3
+        C_1=0.001,
+        C_2=0.008,
+        M=1000,
+        alpha=1,
+        S_churn=0,
+        S_min=0,
+        S_max=float('inf'),
         S_noise=1,
         mode='sde'
     ):
@@ -202,7 +197,7 @@ class Denoiser_EDM_Latent():
             assert scaling == 'none'
             self.s = lambda t: 1
             self.s_deriv = lambda t: 0
-        
+
         # Compute final time steps based on the corresponding noise levels.
         t_steps = self.sigma_inv(self.net.round_sigma(sigma_steps))
         self.t_steps = torch.cat([t_steps, torch.zeros_like(t_steps[:1])]) # t_N = 0
@@ -216,12 +211,11 @@ class Denoiser_EDM_Latent():
         x_next = x_noisy * self.s(self.t_steps[i_start])
 
         # switch to latent space
-        x_next = self.net.vae.encode(x_next).latent_dist.sample()
+        # TODO: scale factor?
+        x_next = self.net.vae.encode(x_next).latent_dist.sample() * 0.18215
 
         x_next = torch.randn_like(x_next, device=self.device)
 
-        x_next_list = []
-        x_next_list.append(self.net.vae.decode(x_next / 0.18215).sample)
         # 0, ..., N-1
         for i, (t_cur, t_next) in enumerate(zip(self.t_steps[:-1], self.t_steps[1:])):
             if i < i_start:
@@ -234,6 +228,7 @@ class Denoiser_EDM_Latent():
             # Euler step.
             lmbd = 2 if self.mode == 'sde' else 1
 
+            print(self.sigma(t_cur))
             denoised = self.net(x_cur / self.s(t_cur), self.sigma(t_cur))
 
             d_cur = (lmbd * self.sigma_deriv(t_cur) / self.sigma(t_cur) + self.s_deriv(t_cur) / self.s(t_cur)) * x_cur - \
@@ -247,17 +242,30 @@ class Denoiser_EDM_Latent():
                                                    * self.sigma(t_cur)) * torch.randn_like(x_cur)
                 x_next += torch.sqrt(t_cur - t_next) * n_cur
 
-            x_next_list.append(self.net.vae.decode(x_next / 0.18215).sample)
+            save_image(self.net.vae.decode(x_next / 0.18215).sample, f"test-{i:04}.png")
 
         # decode from latent space
         x_next = self.net.vae.decode(x_next / 0.18215).sample
-        x_next_list.append(x_next)
 
-        return x_next_list
+        return x_next
 
 if __name__ == "__main__":
     device = torch.device("cuda")
-    denoiser = Denoiser_EDM_Latent(device)
-    outputs = denoiser(torch.zeros((1, 3, 256, 256), device=device), float("inf"))
-    for i in range(len(outputs)):
-        save_image(outputs[i], f"test-{i:04}.png")
+    model = Denoiser_EDM_Latent(None, device, rho=2, discretization="vp")
+    xlist = model(torch.randn(1, 3, 256, 256, device=device), float("inf"))
+    exit()
+
+    D = StableDiffusionPrecond(device)
+    encode = lambda x: D.vae.encode(x).latent_dist.sample() * 0.18215
+    decode = lambda z: D.vae.decode(z / 0.18215).sample
+
+    x = torch.tensor(read_image("images/00003.png") / 255.0, device=device)[None, :3, :, :]
+
+    z = encode(x)
+    noise = torch.randn(1, 4, 256//8, 256//8, device=device) * 0.4
+    z_noisy = z + noise
+
+    z_clean = D(z_noisy, 0.4)
+
+    save_image(decode(z_noisy), f"noisy.png")
+    save_image(decode(z_clean), f"clean.png")

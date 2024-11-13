@@ -96,7 +96,7 @@ class Denoiser_EDM_Latent():
         discretization='vp',
         schedule='linear',
         scaling='none',
-        epsilon_s=1e-3
+        epsilon_s=1e-3,
         C_1=0.001,
         C_2=0.008,
         M=1000,
@@ -214,7 +214,7 @@ class Denoiser_EDM_Latent():
         # TODO: scale factor?
         x_next = self.net.vae.encode(x_next).latent_dist.sample() * 0.18215
 
-        x_next = torch.randn_like(x_next, device=self.device)
+        # x_next = torch.randn_like(x_next, device=self.device)
 
         # 0, ..., N-1
         for i, (t_cur, t_next) in enumerate(zip(self.t_steps[:-1], self.t_steps[1:])):

@@ -11,10 +11,12 @@ class FourierSubsampling(LinearOperator):
 
         # need 3 mask channels or noise is not distributed correctly
         get_mask = lambda: sigpy.mri.poisson((img_dim, img_dim), 30)
-        self.mask = torch.tensor([get_mask(), get_mask(), get_mask()], device=device, dtype=torch.float)
+        # self.mask = torch.tensor([get_mask(), get_mask(), get_mask()], device=device, dtype=torch.float)
+        mask = get_mask()
+        self.mask = torch.tensor([mask, mask, mask], device=device, dtype=torch.float)
 
         # shift the mask instead of the image
-        self.mask = fftshift(self.mask)
+        self.mask = fftshift(self.mask, dim=(-2, -1))
 
 
     @property

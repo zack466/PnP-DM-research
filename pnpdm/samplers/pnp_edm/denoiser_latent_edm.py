@@ -30,7 +30,6 @@ from torchvision.io import read_image
 
 class StableDiffusionPrecond:
     def __init__(self, device, **kwargs):
-
         self.device = device
 
         # loading in diffusion model
@@ -41,8 +40,14 @@ class StableDiffusionPrecond:
         self.tokenizer = self.pipeline.tokenizer
         self.text_encoder = self.pipeline.text_encoder.to(self.device)
 
-        self.alphas = 1.0 - self.pipeline.scheduler.betas
-        self.alphas_cumprod = torch.cumprod(self.alphas, dim=0).to(self.device)
+        self.beta_s = 0.0001
+        self.beta_e = 0.02
+        self.beta_d = self.beta_e**0.5 - self.beta_s**0.5
+
+        # stable diffusion is using pndm scheduler
+        # self.alphas = 1.0 - self.pipeline.scheduler.betas
+        # self.alphas_cumprod = torch.cumprod(self.alphas, dim=0).to(self.device)
+        self.M = self.pipeline.scheduler.num_train_timesteps
 
         # text encoding?
         prompt = ["a young asian child in the sun"]
@@ -54,14 +59,11 @@ class StableDiffusionPrecond:
         self.encoder_hidden_states = torch.cat([uncond_embeddings, text_embeddings])
 
     def __call__(self, x_noisy, sigma):
-        # ???
-        t = self.sigma_inv(sigma)
-
-        c_skip = 1/torch.sqrt(self.alphas_cumprod[t])
-        c_out = -1/torch.sqrt(self.alphas_cumprod[t])
-        c_in = 1
-        c_noise = t
-        print("t =", c_noise)
+        sigma = torch.tensor(sigma)
+        c_skip = 1
+        c_out = -sigma
+        c_in = 1 / (sigma ** 2 + 1).sqrt()
+        c_noise = (self.M - 1) * self.sigma_inv(sigma)
 
         with torch.no_grad():
             latent_model_input = torch.cat([x_noisy] * 2)
@@ -69,15 +71,25 @@ class StableDiffusionPrecond:
 
         # hopefully classifier free guidance
         noise_pred_uncond, noise_pred_text = unet_out.chunk(2)
-        F = noise_pred_uncond + 7.5 * (noise_pred_text - noise_pred_uncond)
+        F = noise_pred_uncond # + 7.5 * (noise_pred_text - noise_pred_uncond)
         return c_skip * x_noisy + c_out * F
 
+    def alpha(self, t):
+        t = torch.tensor(t)
+        return self.beta_s * t + self.beta_s**0.5 * self.beta_d * t**2 + (self.beta_d / 3.0) * t**3
+
     def sigma(self, t):
-        return torch.sqrt(1 - self.alphas_cumprod[t])
+        t = torch.tensor(t)
+        return (torch.exp(self.alpha(t)) - 1).sqrt()
+
+    def sigma_deriv(self, t):
+        t = torch.tensor(t)
+        return 0.5 * (self.beta_s + 2 * self.beta_s**0.5 * self.beta_d * t + self.beta_d * t**2) * torch.exp(self.alpha(t)) / self.sigma(t)
 
     def sigma_inv(self, sigma):
-        all_sigma = self.sigma(torch.arange(len(self.alphas)))
-        return torch.argmin(torch.abs(all_sigma - sigma))
+        sigma = torch.tensor(sigma)
+        sigmas = self.sigma(torch.linspace(0, 10, self.M)).to(self.device)
+        return torch.searchsorted(sigmas, sigma) * 10 / self.M
 
     def round_sigma(self, sigma):
         return torch.as_tensor(sigma)
@@ -90,7 +102,7 @@ class Denoiser_EDM_Latent():
         device,
         num_steps=200,
         sigma_min=0,
-        sigma_max=1,
+        sigma_max=10,
         rho=7,
         solver='euler',
         discretization='vp',
@@ -136,19 +148,23 @@ class Denoiser_EDM_Latent():
         self.net = StableDiffusionPrecond(device)
 
         # Helper functions for VP & VE noise level schedules.
-        vp_sigma = lambda beta_d, beta_min: lambda t: (np.e ** (0.5 * beta_d * (t ** 2) + beta_min * t) - 1) ** 0.5
-        vp_sigma_deriv = lambda beta_d, beta_min: lambda t: 0.5 * (beta_min + beta_d * t) * (self.sigma(t) + 1 / self.sigma(t))
-        vp_sigma_inv = lambda beta_d, beta_min: lambda sigma: ((beta_min ** 2 + 2 * beta_d * (sigma ** 2 + 1).log()).sqrt() - beta_min) / beta_d
+        # vp_sigma = lambda beta_d, beta_min: lambda t: (np.e ** (0.5 * beta_d * (t ** 2) + beta_min * t) - 1) ** 0.5
+        # vp_sigma_deriv = lambda beta_d, beta_min: lambda t: 0.5 * (beta_min + beta_d * t) * (self.sigma(t) + 1 / self.sigma(t))
+        # vp_sigma_inv = lambda beta_d, beta_min: lambda sigma: ((beta_min ** 2 + 2 * beta_d * (sigma ** 2 + 1).log()).sqrt() - beta_min) / beta_d
+        vp_sigma = self.net.sigma
+        vp_sigma_deriv = self.net.sigma_deriv
+        vp_sigma_inv = self.net.sigma_inv
+
         ve_sigma = lambda t: t.sqrt()
         ve_sigma_deriv = lambda t: 0.5 / t.sqrt()
         ve_sigma_inv = lambda sigma: sigma ** 2
 
         # Select default noise level range based on the specified time step discretization.
         if sigma_min is None:
-            vp_def = vp_sigma(beta_d=19.9, beta_min=0.1)(t=epsilon_s)
+            vp_def = vp_sigma(t=epsilon_s)
             sigma_min = {'vp': vp_def, 've': 0.02, 'iddpm': 0.002, 'edm': 0.002}[discretization]
         if sigma_max is None:
-            vp_def = vp_sigma(beta_d=19.9, beta_min=0.1)(t=1)
+            vp_def = vp_sigma(t=1)
             sigma_max = {'vp': vp_def, 've': 100, 'iddpm': 81, 'edm': 80}[discretization]
 
         # Compute corresponding betas for VP.
@@ -159,7 +175,7 @@ class Denoiser_EDM_Latent():
         step_indices = torch.arange(num_steps, dtype=torch.float64, device=device)
         if discretization == 'vp':
             orig_t_steps = 1 + step_indices / (num_steps - 1) * (epsilon_s - 1)
-            sigma_steps = vp_sigma(vp_beta_d, vp_beta_min)(orig_t_steps)
+            sigma_steps = vp_sigma(orig_t_steps)
         elif discretization == 've':
             orig_t_steps = (sigma_max ** 2) * ((sigma_min ** 2 / sigma_max ** 2) ** (step_indices / (num_steps - 1)))
             sigma_steps = ve_sigma(orig_t_steps)
@@ -176,9 +192,9 @@ class Denoiser_EDM_Latent():
 
         # Define noise level schedule.
         if schedule == 'vp':
-            self.sigma = vp_sigma(vp_beta_d, vp_beta_min)
-            self.sigma_deriv = vp_sigma_deriv(vp_beta_d, vp_beta_min)
-            self.sigma_inv = vp_sigma_inv(vp_beta_d, vp_beta_min)
+            self.sigma = vp_sigma
+            self.sigma_deriv = vp_sigma_deriv
+            self.sigma_inv = vp_sigma_inv
         elif schedule == 've':
             self.sigma = ve_sigma
             self.sigma_deriv = ve_sigma_deriv
@@ -214,7 +230,7 @@ class Denoiser_EDM_Latent():
         # TODO: scale factor?
         x_next = self.net.vae.encode(x_next).latent_dist.sample() * 0.18215
 
-        # x_next = torch.randn_like(x_next, device=self.device)
+        x_next = torch.randn_like(x_next, device=self.device) * self.s(self.t_steps[i_start]) * self.sigma(self.t_steps[i_start])
 
         # 0, ..., N-1
         for i, (t_cur, t_next) in enumerate(zip(self.t_steps[:-1], self.t_steps[1:])):
@@ -223,12 +239,11 @@ class Denoiser_EDM_Latent():
                 continue
 
             x_cur = x_next
-            t_cur = t_cur
 
             # Euler step.
             lmbd = 2 if self.mode == 'sde' else 1
 
-            print(self.sigma(t_cur))
+            print(i, self.sigma(t_cur))
             denoised = self.net(x_cur / self.s(t_cur), self.sigma(t_cur))
 
             d_cur = (lmbd * self.sigma_deriv(t_cur) / self.sigma(t_cur) + self.s_deriv(t_cur) / self.s(t_cur)) * x_cur - \
@@ -251,21 +266,20 @@ class Denoiser_EDM_Latent():
 
 if __name__ == "__main__":
     device = torch.device("cuda")
-    model = Denoiser_EDM_Latent(None, device, rho=2, discretization="vp")
-    xlist = model(torch.randn(1, 3, 256, 256, device=device), float("inf"))
-    exit()
+    model = Denoiser_EDM_Latent(None, device, rho=10, discretization="edm", scaling="vp", schedule="vp")
+    xlist = model(torch.randn(1, 3, 256, 256, device=device), 10)
 
-    D = StableDiffusionPrecond(device)
-    encode = lambda x: D.vae.encode(x).latent_dist.sample() * 0.18215
-    decode = lambda z: D.vae.decode(z / 0.18215).sample
-
-    x = torch.tensor(read_image("images/00003.png") / 255.0, device=device)[None, :3, :, :]
-
-    z = encode(x)
-    noise = torch.randn(1, 4, 256//8, 256//8, device=device) * 0.4
-    z_noisy = z + noise
-
-    z_clean = D(z_noisy, 0.4)
-
-    save_image(decode(z_noisy), f"noisy.png")
-    save_image(decode(z_clean), f"clean.png")
+    # D = StableDiffusionPrecond(device)
+    # encode = lambda x: D.vae.encode(x).latent_dist.sample() * 0.18215
+    # decode = lambda z: D.vae.decode(z / 0.18215).sample
+    #
+    # x = torch.tensor(read_image("images/00003.png") / 255.0, device=device)[None, :3, :, :]
+    #
+    # z = encode(x)
+    # noise = torch.randn(1, 4, 256//8, 256//8, device=device) * 0.4
+    # z_noisy = z + noise
+    #
+    # z_clean = D(z_noisy, 0.4)
+    #
+    # save_image(decode(z_noisy), f"noisy.png")
+    # save_image(decode(z_clean), f"clean.png")

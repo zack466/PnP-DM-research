@@ -256,7 +256,7 @@ class Denoiser_EDM_Latent():
 
 
         x_next = self.decode_image(x_next)
-        return x_next[:,:,::2,::2]
+        return x_next
 
 
 if __name__ == "__main__":

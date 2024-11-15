@@ -45,7 +45,7 @@ class StableDiffusionPrecond:
         self.alphas_cumprod = torch.cumprod(self.alphas, dim=0).to(self.device)
 
         # text encoding?
-        prompt = ["a young asian child in the sun"]
+        prompt = ["face of an asian child about 2 years old, as a high quality photograph"]
         text_input = self.tokenizer(prompt, padding="max_length", max_length=self.tokenizer.model_max_length, truncation=True, return_tensors="pt")
         text_embeddings = self.text_encoder(text_input.input_ids.to(self.device))[0]
         max_length = text_input.input_ids.shape[-1]
@@ -53,13 +53,17 @@ class StableDiffusionPrecond:
         uncond_embeddings = self.text_encoder(uncond_input.input_ids.to(self.device))[0]
         self.encoder_hidden_states = torch.cat([uncond_embeddings, text_embeddings])
 
+        self.sigma_min = self.sigma_inv(0).item()
+        self.sigma_max = self.sigma_inv(len(self.alphas)).item()
+
     def __call__(self, x_noisy, sigma):
         # ???
+        print(sigma)
         t = self.sigma_inv(sigma)
 
-        c_skip = 1/torch.sqrt(self.alphas_cumprod[t])
-        c_out = -1/torch.sqrt(self.alphas_cumprod[t])
-        c_in = 1
+        c_skip = 1
+        c_out = -sigma
+        c_in = 1 / (sigma ** 2 + 1) ** 0.5
         c_noise = t
         print("t =", c_noise)
 
@@ -73,27 +77,28 @@ class StableDiffusionPrecond:
         return c_skip * x_noisy + c_out * F
 
     def sigma(self, t):
-        return torch.sqrt(1 - self.alphas_cumprod[t])
+        return torch.sqrt(1 - self.alphas_cumprod[t]) / torch.sqrt(self.alphas_cumprod[t])
 
     def sigma_inv(self, sigma):
+        sigma = torch.as_tensor(sigma, device=self.device).reshape(-1)
         all_sigma = self.sigma(torch.arange(len(self.alphas)))
-        return torch.argmin(torch.abs(all_sigma - sigma))
+        return torch.argmin(torch.abs(all_sigma[None, :] - sigma[:, None]), dim=1)
 
     def round_sigma(self, sigma):
-        return torch.as_tensor(sigma)
+        return self.sigma(self.sigma_inv(sigma))
 
 
 class Denoiser_EDM_Latent():
     def __init__(
         self,
-        model_throwaway,
+        throwaway,
         device,
-        num_steps=200,
-        sigma_min=0,
-        sigma_max=1,
+        num_steps=18,
+        sigma_min=None,
+        sigma_max=None,
         rho=7,
         solver='euler',
-        discretization='vp',
+        discretization='edm',
         schedule='linear',
         scaling='none',
         epsilon_s=1e-3,
@@ -107,6 +112,7 @@ class Denoiser_EDM_Latent():
         S_noise=1,
         mode='sde'
     ):
+        self.net = StableDiffusionPrecond(device)
         self.device = device
         self.num_steps = num_steps
         self.sigma_min = sigma_min
@@ -133,8 +139,6 @@ class Denoiser_EDM_Latent():
         assert scaling in ['vp', 'none']
         assert mode in ['sde', 'pfode'], "Only SDE and PFODE modes are supported."
 
-        self.net = StableDiffusionPrecond(device)
-
         # Helper functions for VP & VE noise level schedules.
         vp_sigma = lambda beta_d, beta_min: lambda t: (np.e ** (0.5 * beta_d * (t ** 2) + beta_min * t) - 1) ** 0.5
         vp_sigma_deriv = lambda beta_d, beta_min: lambda t: 0.5 * (beta_min + beta_d * t) * (self.sigma(t) + 1 / self.sigma(t))
@@ -150,6 +154,10 @@ class Denoiser_EDM_Latent():
         if sigma_max is None:
             vp_def = vp_sigma(beta_d=19.9, beta_min=0.1)(t=1)
             sigma_max = {'vp': vp_def, 've': 100, 'iddpm': 81, 'edm': 80}[discretization]
+
+        # Adjust noise levels based on what's supported by the network.
+        sigma_min = max(sigma_min, self.net.sigma_min)
+        sigma_max = min(sigma_max, self.net.sigma_max)
 
         # Compute corresponding betas for VP.
         vp_beta_d = 2 * (np.log(sigma_min ** 2 + 1) / epsilon_s - np.log(sigma_max ** 2 + 1)) / (epsilon_s - 1)
@@ -197,27 +205,34 @@ class Denoiser_EDM_Latent():
             assert scaling == 'none'
             self.s = lambda t: 1
             self.s_deriv = lambda t: 0
-
+        
         # Compute final time steps based on the corresponding noise levels.
         t_steps = self.sigma_inv(self.net.round_sigma(sigma_steps))
         self.t_steps = torch.cat([t_steps, torch.zeros_like(t_steps[:1])]) # t_N = 0
 
+    def encode_image(self, img):
+        with torch.no_grad():
+            img = img * 2 - 1
+            encoded = self.net.vae.encode(img).latent_dist.sample() * 0.18215
+            return encoded
+
+    def decode_image(self, latents):
+        with torch.no_grad():
+            decoded = self.net.vae.decode(latents / 0.18215).sample
+            decoded = (decoded / 2 + 0.5).clamp(0,1)
+            return decoded
+
     @torch.no_grad()
     def __call__(self, x_noisy, eta):
-        # find the smallest t such that sigma(t) < eta
-        i_start = torch.min(torch.nonzero(self.sigma(self.t_steps) < eta))
+        i_start = torch.min(torch.nonzero(self.sigma(self.t_steps) < eta)) # find the smallest t such that sigma(t) < eta
 
         # Main sampling loop. (starting from t_start with state initialized at x_noisy)
         x_next = x_noisy * self.s(self.t_steps[i_start])
+        x_next = self.encode_image(x_next)
 
-        # switch to latent space
-        # TODO: scale factor?
-        x_next = self.net.vae.encode(x_next).latent_dist.sample() * 0.18215
-
-        # x_next = torch.randn_like(x_next, device=self.device)
-
-        # 0, ..., N-1
-        for i, (t_cur, t_next) in enumerate(zip(self.t_steps[:-1], self.t_steps[1:])):
+        x_next = torch.randn(1, 4, 512//8, 512//8, device=self.device) * self.s(self.t_steps[i_start]) * self.sigma(self.t_steps[i_start])
+        
+        for i, (t_cur, t_next) in enumerate(zip(self.t_steps[:-1], self.t_steps[1:])): # 0, ..., N-1
             if i < i_start:
                 # Skip the steps before i_start.
                 continue
@@ -227,45 +242,40 @@ class Denoiser_EDM_Latent():
 
             # Euler step.
             lmbd = 2 if self.mode == 'sde' else 1
-
-            print(self.sigma(t_cur))
-            denoised = self.net(x_cur / self.s(t_cur), self.sigma(t_cur))
-
+            denoised = self.net(x_cur / self.s(t_cur), self.sigma(t_cur)).to(torch.float32)
             d_cur = (lmbd * self.sigma_deriv(t_cur) / self.sigma(t_cur) + self.s_deriv(t_cur) / self.s(t_cur)) * x_cur - \
-                lmbd * self.sigma_deriv(t_cur) * self.s(t_cur) / \
-                self.sigma(t_cur) * denoised
+                     lmbd * self.sigma_deriv(t_cur) * self.s(t_cur) / self.sigma(t_cur) * denoised 
             x_next = x_cur + (t_next - t_cur) * d_cur
+
+            save_image(self.decode_image(x_next), f"test-{i:04}.png")
 
             # Update
             if i != self.num_steps - 1 and self.mode == 'sde':
-                n_cur = self.s(t_cur) * torch.sqrt(2 * self.sigma_deriv(t_cur)
-                                                   * self.sigma(t_cur)) * torch.randn_like(x_cur)
+                n_cur = self.s(t_cur) * torch.sqrt(2 * self.sigma_deriv(t_cur) * self.sigma(t_cur)) * torch.randn_like(x_cur)
                 x_next += torch.sqrt(t_cur - t_next) * n_cur
 
-            save_image(self.net.vae.decode(x_next / 0.18215).sample, f"test-{i:04}.png")
 
-        # decode from latent space
-        x_next = self.net.vae.decode(x_next / 0.18215).sample
+        x_next = self.decode_image(x_next)
+        return x_next[:,:,::2,::2]
 
-        return x_next
 
 if __name__ == "__main__":
     device = torch.device("cuda")
-    model = Denoiser_EDM_Latent(None, device, rho=2, discretization="vp")
-    xlist = model(torch.randn(1, 3, 256, 256, device=device), float("inf"))
+    model = Denoiser_EDM_Latent(None, device, num_steps=100)
+    xlist = model(torch.randn(1, 3, 512, 512, device=device), float("inf"))
     exit()
 
     D = StableDiffusionPrecond(device)
-    encode = lambda x: D.vae.encode(x).latent_dist.sample() * 0.18215
-    decode = lambda z: D.vae.decode(z / 0.18215).sample
+    encode = lambda x: D.vae.encode(2*x - 1).latent_dist.sample() * 0.18215
+    decode = lambda z: D.vae.decode(z / 0.18215).sample / 2 + 0.5
 
     x = torch.tensor(read_image("images/00003.png") / 255.0, device=device)[None, :3, :, :]
 
     z = encode(x)
-    noise = torch.randn(1, 4, 256//8, 256//8, device=device) * 0.4
+    noise = torch.randn(1, 4, 256//8, 256//8, device=device) * 1
     z_noisy = z + noise
 
-    z_clean = D(z_noisy, 0.4)
+    z_clean = D(z_noisy, 1)
 
     save_image(decode(z_noisy), f"noisy.png")
     save_image(decode(z_clean), f"clean.png")

@@ -34,8 +34,9 @@ class StableDiffusionPrecond:
         self.device = device
 
         # loading in diffusion model
-        self.pipeline = StableDiffusionPipeline.from_pretrained(
-            "stable-diffusion-v1-5/stable-diffusion-v1-5")
+        # self.pipeline = StableDiffusionPipeline.from_pretrained(
+        #     "stable-diffusion-v1-5/stable-diffusion-v1-5")
+        self.pipeline = StableDiffusionPipeline.from_pretrained("lambdalabs/miniSD-diffusers")
         self.unet = self.pipeline.unet.to(device)
         self.vae = self.pipeline.vae.to(device)
         self.tokenizer = self.pipeline.tokenizer
@@ -51,7 +52,7 @@ class StableDiffusionPrecond:
 
         # text encoding?
         prompt = [
-            "face of an asian child about 2 years old, smiling, as a high quality photograph"]
+            "harvey specter from suits"]
         text_input = self.tokenizer(
             prompt, padding="max_length", max_length=self.tokenizer.model_max_length, truncation=True, return_tensors="pt")
         text_embeddings = self.text_encoder(
@@ -69,11 +70,11 @@ class StableDiffusionPrecond:
         self.sigma_max = self.sigma_inv(self.M).item()
 
     def __call__(self, x_noisy, sigma):
+        # vp preconditioning with new noise schedule
         c_skip = 1
         c_out = -sigma
         c_in = 1 / (sigma ** 2 + 1) ** 0.5
         c_noise = self.sigma_inv(sigma)
-        print("t =", c_noise)
 
         with torch.no_grad():
             latent_model_input = torch.cat([x_noisy] * 2)
@@ -86,6 +87,7 @@ class StableDiffusionPrecond:
         return c_skip * x_noisy + c_out * F
 
     # expects t in [0, 1)
+    # Note: this is the alpha's used in the noise derivation, not the noise schedule
     def alpha(self, t):
         t = torch.tensor(t)
         return self.beta_s * t + self.beta_s**0.5 * self.beta_d * t**2 + (self.beta_d**2.0 / 3.0) * t**3
@@ -243,10 +245,13 @@ class Denoiser_EDM_Latent():
         self.t_steps = torch.cat(
             [t_steps, torch.zeros_like(t_steps[:1])])  # t_N = 0
 
-    def encode_image(self, img):
+    # encode image to latent space and possibly add noise
+    def encode_image(self, img, image_noise_t=0, latent_noise_t=0):
         with torch.no_grad():
+            img = self.s(image_noise_t)*img + self.sigma(image_noise_t)*self.s(image_noise_t)*torch.randn_like(img)
             img = img * 2 - 1
             encoded = self.net.vae.encode(img).latent_dist.sample() * 0.18215
+            encoded = self.s(latent_noise_t)*encoded + self.sigma(latent_noise_t)*self.s(latent_noise_t)*torch.randn_like(encoded)
             return encoded
 
     def decode_image(self, latents):
@@ -261,11 +266,14 @@ class Denoiser_EDM_Latent():
         i_start = torch.min(torch.nonzero(self.sigma(self.t_steps) < eta))
 
         # Main sampling loop. (starting from t_start with state initialized at x_noisy)
-        x_next = x_noisy * self.s(self.t_steps[i_start])
-        x_next = self.encode_image(x_next)
+        # image noise controls how much noise in image space is added (based on the latent timestep)
+        # latent noise controls how muhc noise in latent space is added (should equal eta if image noise is 0)
+        x_next = self.encode_image(x_noisy, image_noise_t=0, latent_noise_t=self.sigma_inv(eta))
+        x_next = x_next * self.s(self.t_steps[i_start])
 
-        x_next = torch.randn(1, 4, 512//8, 512//8, device=self.device) * \
-            self.s(self.t_steps[i_start]) * self.sigma(self.t_steps[i_start])
+        # uncomment this and set eta to inf to automatically run from pure noise every time
+        # x_next = torch.randn(1, 4, 512//8, 512//8, device=self.device) * \
+        #     self.s(self.t_steps[i_start]) * self.sigma(self.t_steps[i_start])
 
         # 0, ..., N-1
         for i, (t_cur, t_next) in enumerate(zip(self.t_steps[:-1], self.t_steps[1:])):
@@ -300,7 +308,10 @@ class Denoiser_EDM_Latent():
 if __name__ == "__main__":
     device = torch.device("cuda")
     model = Denoiser_EDM_Latent(None, device, num_steps=100)
-    xlist = model(torch.randn(1, 3, 512, 512, device=device), float("inf"))
+
+    x_clean = torch.tensor(read_image("images/00003.png") /
+                     255.0, device=device)[None, :3, :, :]
+    xlist = model(x_clean, 10)
     exit()
 
     D = StableDiffusionPrecond(device)

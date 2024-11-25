@@ -24,8 +24,8 @@
 from diffusers import StableDiffusionPipeline
 import torch
 import numpy as np
-from torchvision.utils import save_image
-from torchvision.io import read_image
+from torchvision.utils import save_image as tv_save_image
+from torchvision.io import read_image as tv_read_image
 
 
 class StableDiffusionPrecond:
@@ -248,16 +248,14 @@ class Denoiser_EDM_Latent():
     # encode image to latent space and possibly add noise
     def encode_image(self, img, image_noise_t=0, latent_noise_t=0):
         with torch.no_grad():
-            img = self.s(image_noise_t)*img + self.sigma(image_noise_t)*self.s(image_noise_t)*torch.randn_like(img)
-            img = img * 2 - 1
+            # img = self.s(image_noise_t)*img + self.sigma(image_noise_t)*self.s(image_noise_t)*torch.randn_like(img)
             encoded = self.net.vae.encode(img).latent_dist.sample() * 0.18215
-            encoded = self.s(latent_noise_t)*encoded + self.sigma(latent_noise_t)*self.s(latent_noise_t)*torch.randn_like(encoded)
+            # encoded = self.s(latent_noise_t)*encoded + self.sigma(latent_noise_t)*self.s(latent_noise_t)*torch.randn_like(encoded)
             return encoded
 
     def decode_image(self, latents):
         with torch.no_grad():
             decoded = self.net.vae.decode(latents / 0.18215).sample
-            decoded = (decoded / 2 + 0.5).clamp(0, 1)
             return decoded
 
     @torch.no_grad()
@@ -268,7 +266,7 @@ class Denoiser_EDM_Latent():
         # Main sampling loop. (starting from t_start with state initialized at x_noisy)
         # image noise controls how much noise in image space is added (based on the latent timestep)
         # latent noise controls how muhc noise in latent space is added (should equal eta if image noise is 0)
-        x_next = self.encode_image(x_noisy, image_noise_t=0, latent_noise_t=self.sigma_inv(eta))
+        x_next = self.encode_image(x_noisy, image_noise_t=0, latent_noise_t=0)
         x_next = x_next * self.s(self.t_steps[i_start])
 
         # uncomment this and set eta to inf to automatically run from pure noise every time
@@ -304,13 +302,21 @@ class Denoiser_EDM_Latent():
         x_next = self.decode_image(x_next)
         return x_next
 
+# save image which is already scaled from -1 to 1
+def save_image(img, path):
+    tv_save_image((img / 2 + 0.5).clamp(0, 1), path)
+
+# read image and scale from -1 to 1
+def read_image(path):
+    img = torch.tensor(tv_read_image(path) /
+                     255.0, device=device)[None, :3, :, :]
+    return img*2-1
 
 if __name__ == "__main__":
     device = torch.device("cuda")
     model = Denoiser_EDM_Latent(None, device, num_steps=100)
 
-    x_clean = torch.tensor(read_image("images/00003.png") /
-                     255.0, device=device)[None, :3, :, :]
+    x_clean = read_image("images/00003.png")
     xlist = model(x_clean, 10)
     exit()
 

@@ -6,7 +6,7 @@ from collections import defaultdict
 from .denoiser_edm import Denoiser_EDM
 from .denoiser_latent_edm import Denoiser_EDM_Latent
 
-class PnPEDM:
+class PnPEDMLatent:
     def __init__(self, config, model, operator, noiser, device):
         self.config = config
         self.model = model
@@ -14,23 +14,23 @@ class PnPEDM:
         self.noiser = noiser
         self.device = device
         if config.mode == 'vp':
-            self.edm = Denoiser_EDM(model, device, **config.common_kwargs, **config.vp_kwargs, mode='pfode')
+            self.edm = Denoiser_EDM_Latent(model, device, **config.common_kwargs, **config.vp_kwargs, mode='pfode')
         elif config.mode == 've':
-            self.edm = Denoiser_EDM(model, device, **config.common_kwargs, **config.ve_kwargs, mode='pfode')
+            self.edm = Denoiser_EDM_Latent(model, device, **config.common_kwargs, **config.ve_kwargs, mode='pfode')
         elif config.mode == 'iddpm':
-            self.edm = Denoiser_EDM(model, device, **config.common_kwargs, **config.iddpm_kwargs, mode='pfode')
+            self.edm = Denoiser_EDM_Latent(model, device, **config.common_kwargs, **config.iddpm_kwargs, mode='pfode')
         elif config.mode == 'edm':
-            self.edm = Denoiser_EDM(model, device, **config.common_kwargs, **config.edm_kwargs, mode='pfode')
+            self.edm = Denoiser_EDM_Latent(model, device, **config.common_kwargs, **config.edm_kwargs, mode='pfode')
         elif config.mode == 'vp_sde':
-            self.edm = Denoiser_EDM(model, device, **config.common_kwargs, **config.vp_kwargs, mode='sde')
+            self.edm = Denoiser_EDM_Latent(model, device, **config.common_kwargs, **config.vp_kwargs, mode='sde')
         elif config.mode == 've_sde':
-            self.edm = Denoiser_EDM(model, device, **config.common_kwargs, **config.ve_kwargs, mode='sde')
+            self.edm = Denoiser_EDM_Latent(model, device, **config.common_kwargs, **config.ve_kwargs, mode='sde')
         elif config.mode == 'iddpm_sde':
-            self.edm = Denoiser_EDM(model, device, **config.common_kwargs, **config.iddpm_kwargs, mode='sde')
+            self.edm = Denoiser_EDM_Latent(model, device, **config.common_kwargs, **config.iddpm_kwargs, mode='sde')
         elif config.mode == 'edm_sde':
-            self.edm = Denoiser_EDM(model, device, **config.common_kwargs, **config.edm_kwargs, mode='sde')
+            self.edm = Denoiser_EDM_Latent(model, device, **config.common_kwargs, **config.edm_kwargs, mode='sde')
         else:
-            raise NotImplementedError(f"Mode {self.config.mode} is not implemented.")
+            raise NotImplementedError(f"Mode {self.config.mode} is not implemented (must be latent_sde for pnp_edm_latent)")
 
     @property
     def display_name(self):
@@ -119,26 +119,3 @@ class PnPEDM:
 
         return torch.concat(samples, dim=0)
 
-
-class PnPEDMBatch(PnPEDM):
-    @property
-    def display_name(self):
-        return f'pnp-edm-batch-{self.config.mode}-rho0={self.config.rho}-rhomin={self.config.rho_min}'
-
-    def __call__(self, gt, y_n, record=False, fname=None, save_root=None, inv_transform=None, metrics={}):
-        x = torch.randn(self.config.num_samples_per_run, *gt.shape[1:]).to(gt.device)
-
-        nfe = []
-        # logging
-        sub_pbar = tqdm(range(self.config.num_iters))
-        for i in sub_pbar:
-            rho_iter = self.config.rho * (self.config.rho_decay_rate**i)
-            rho_iter = max(rho_iter, self.config.rho_min)
-
-            # likelihood step
-            z = self.operator.proximal_generator(x, y_n, self.noiser.sigma, rho_iter)
-
-            # prior step
-            x = self.edm(z, rho_iter)
-
-        return x

@@ -254,20 +254,19 @@ class Denoiser_EDM_Latent():
             return encoded
 
     def decode_image(self, latents):
-        with torch.no_grad():
-            decoded = self.net.vae.decode(latents / 0.18215).sample
-            return decoded
+        decoded = self.net.vae.decode(latents / 0.18215).sample
+        return decoded
 
     @torch.no_grad()
-    def __call__(self, x_noisy, eta):
+    def __call__(self, z_noisy, eta):
         # find the smallest t such that sigma(t) < eta
         i_start = torch.min(torch.nonzero(self.sigma(self.t_steps) < eta))
 
         # Main sampling loop. (starting from t_start with state initialized at x_noisy)
         # image noise controls how much noise in image space is added (based on the latent timestep)
         # latent noise controls how muhc noise in latent space is added (should equal eta if image noise is 0)
-        x_next = self.encode_image(x_noisy, image_noise_t=0, latent_noise_t=0)
-        x_next = x_next * self.s(self.t_steps[i_start])
+        # x_next = self.encode_image(x_noisy, image_noise_t=0, latent_noise_t=0)
+        x_next = z_noisy * self.s(self.t_steps[i_start])
 
         # uncomment this and set eta to inf to automatically run from pure noise every time
         # x_next = torch.randn(1, 4, 512//8, 512//8, device=self.device) * \
@@ -291,7 +290,7 @@ class Denoiser_EDM_Latent():
                 self.sigma(t_cur) * denoised
             x_next = x_cur + (t_next - t_cur) * d_cur
 
-            save_image(self.decode_image(x_next), f"test-{i:04}.png")
+            # self.save_image(self.decode_image(x_next), f"test-{i:04}.png")
 
             # Update
             if i != self.num_steps - 1 and self.mode == 'sde':
@@ -299,18 +298,19 @@ class Denoiser_EDM_Latent():
                                                    * self.sigma(t_cur)) * torch.randn_like(x_cur)
                 x_next += torch.sqrt(t_cur - t_next) * n_cur
 
-        x_next = self.decode_image(x_next)
         return x_next
 
-# save image which is already scaled from -1 to 1
-def save_image(img, path):
-    tv_save_image((img / 2 + 0.5).clamp(0, 1), path)
+    # save image which is already scaled from -1 to 1
+    @staticmethod
+    def save_image(img, path):
+        tv_save_image((img / 2 + 0.5).clamp(0, 1), path)
 
-# read image and scale from -1 to 1
-def read_image(path):
-    img = torch.tensor(tv_read_image(path) /
-                     255.0, device=device)[None, :3, :, :]
-    return img*2-1
+    # read image and scale from -1 to 1
+    @staticmethod
+    def read_image(path):
+        img = torch.tensor(tv_read_image(path) /
+                         255.0, device=device)[None, :3, :, :]
+        return img*2-1
 
 if __name__ == "__main__":
     device = torch.device("cuda")

@@ -301,15 +301,13 @@ class Denoiser_EDM_Latent():
         return x_next
 
     # save image which is already scaled from -1 to 1
-    @staticmethod
-    def save_image(img, path):
+    def save_image(self, img, path):
         tv_save_image((img / 2 + 0.5).clamp(0, 1), path)
 
     # read image and scale from -1 to 1
-    @staticmethod
-    def read_image(path):
+    def read_image(self, path):
         img = torch.tensor(tv_read_image(path) /
-                         255.0, device=device)[None, :3, :, :]
+                         255.0, device=self.device)[None, :3, :, :]
         return img*2-1
 
 if __name__ == "__main__":

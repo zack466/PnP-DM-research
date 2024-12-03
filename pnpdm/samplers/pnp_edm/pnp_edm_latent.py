@@ -1,9 +1,10 @@
 import torch, os
 import numpy as np
+from tqdm import tqdm
 import matplotlib.pyplot as plt
 from tqdm import tqdm
 from collections import defaultdict
-from .denoiser_edm import Denoiser_EDM
+
 from .denoiser_latent_edm import Denoiser_EDM_Latent
 
 class PnPEDMLatent:
@@ -36,15 +37,15 @@ class PnPEDMLatent:
     def display_name(self):
         return f'pnp-edm-latent-{self.config.mode}-rho0={self.config.rho}-rhomin={self.config.rho_min}'
 
-    def proximal_generator(self, x, y, sigma, rho, gamma=1e-4, num_iters=100):
+    def proximal_generator(self, x, y, sigma, rho, gamma=2e-4, num_iters=200):
         z = x
-        z.requires_grad_()
-        for _ in range(num_iters):
+        z.requires_grad = True
+        for _ in tqdm(range(num_iters)):
             # forward operator is A(D(z))
             data_fit = (self.operator.forward(self.edm.decode_image(z)) - y).norm()**2 / (2*sigma**2)
             grad = torch.autograd.grad(outputs=data_fit, inputs=z)[0]
-            z = z - gamma * grad - (gamma/rho**2) * (z - x) + np.sqrt(2*gamma) * torch.randn_like(x)
-        return z.type(torch.float32)
+            z = z - gamma * grad - (gamma/rho**2) * (z - x) #+ np.sqrt(2*gamma) * torch.randn_like(x)
+        return z.type(torch.float32) + rho * torch.randn_like(x)
 
     def __call__(self, gt, y_n, record=False, fname=None, save_root=None, inv_transform=None, metrics={}):
         assert inv_transform is not None, "inv_transform cannot be None"
@@ -60,18 +61,18 @@ class PnPEDMLatent:
         for name, metric in metrics.items():
             log[name].append(metric(x_save, inv_transform(gt)).item())
 
-        xs_save = torch.cat((inv_transform(gt), x_save), dim=-1)
+        xs_save = torch.cat((inv_transform(gt), x_save), dim=-1).detach().cpu()
         try:
-            zs_save = torch.cat((inv_transform(y_n.reshape(*gt.shape)), z_save), dim=-1)
+            zs_save = torch.cat((inv_transform(y_n.reshape(*gt.shape)), z_save), dim=-1).detach().cpu()
         except:
             try:
-                zs_save = torch.cat((inv_transform(self.operator.A_pinv(y_n).reshape(*gt.shape)), z_save), dim=-1)
+                zs_save = torch.cat((inv_transform(self.operator.A_pinv(y_n).reshape(*gt.shape)), z_save), dim=-1).detach().cpu()
             except:
-                zs_save = torch.cat((z_save, z_save), dim=-1)
+                zs_save = torch.cat((z_save, z_save), dim=-1).detach().cpu()
 
         if record:
-            log["gt"] = inv_transform(gt).permute(0, 2, 3, 1).squeeze().cpu().numpy()
-            log["x"].append(x_save.permute(0, 2, 3, 1).squeeze().cpu().numpy())
+            log["gt"] = inv_transform(gt).permute(0, 2, 3, 1).squeeze()
+            log["x"].append(x_save.permute(0, 2, 3, 1).squeeze().detach())
 
         samples = []
         iters_count_as_sample = np.linspace(
@@ -88,14 +89,14 @@ class PnPEDMLatent:
 
             # likelihood step
             z_latent = self.proximal_generator(x_latent, y_n, self.noiser.sigma, rho_iter)
-            z = self.edm.decode_image(x_latent)
+            z = self.edm.decode_image(z_latent)
         
             # prior step
             x_latent = self.edm(z_latent, rho_iter)
             x = self.edm.decode_image(x_latent)
 
             if i in iters_count_as_sample:
-                samples.append(x)
+                samples.append(x.detach().cpu())
 
             # logging
             x_save = inv_transform(x)
@@ -103,11 +104,12 @@ class PnPEDMLatent:
             for name, metric in metrics.items():
                 log[name].append(metric(x_save, inv_transform(gt)).item())
             sub_pbar.set_description(f'running PnP-EDM (xrange=[{x.min().item():.2f}, {x.max().item():.2f}], zrange=[{z.min().item():.2f}, {z.max().item():.2f}]) | psnr: {log["psnr"][-1]:.4f}')
-            
-            if i % (self.config.num_iters//10) == 0:
-                xs_save = torch.cat((xs_save, x_save), dim=-1)
-                zs_save = torch.cat((zs_save, z_save), dim=-1)
 
+            if i % (self.config.num_iters//10) == 0:
+                xs_save = torch.cat((xs_save, x_save.detach().cpu()), dim=-1)
+                zs_save = torch.cat((zs_save, z_save.detach().cpu()), dim=-1)
+
+            self.edm.save_image(x, "current_x.png")
             self.edm.save_image(z, "current_z.png")
             # plt.imsave(os.path.join(save_root, 'progress', fname+f"x-{i}.png"), x_save.permute(0, 2, 3, 1).squeeze().cpu().numpy(), cmap=cmap)
             # plt.imsave(os.path.join(save_root, 'progress', fname+f"z-{i}.png"), z_save.permute(0, 2, 3, 1).squeeze().cpu().numpy(), cmap=cmap)
@@ -135,3 +137,26 @@ class PnPEDMLatent:
 
         return torch.concat(samples, dim=0)
 
+# class Mode:
+#     mode = "edm_sde"
+#     common_kwargs = {}
+#     edm_kwargs = {}
+#
+# if __name__ == "__main__":
+#     device = torch.device("cuda")
+#     operator = GaussialBlurCircular(61, 7.0, 3, 256, device)
+#     noiser = GaussianNoise(0.05)
+#     pnp = PnPEDMLatent(Mode(), None, operator, noiser, device)
+#
+#     gt = pnp.edm.read_image("images/00003.png")
+#     y = noiser.forward(operator.forward(gt))
+#
+#     encoded = pnp.edm.read_image("images/00003.png")
+#     encoded = pnp.edm.encode_image(encoded)
+#     encoded = torch.zeros_like(encoded)
+#
+#     rho = 2
+#     likelihood = pnp.proximal_generator(encoded, y, noiser.sigma, rho)
+#
+#     pnp.edm.save_image(pnp.edm.encode_image(gt) + torch.randn_like(encoded)*rho, "encoded.png")
+#     pnp.edm.save_image(likelihood, "likelihood.png")

@@ -14,22 +14,23 @@ class PnPEDMLatent:
         self.operator = operator
         self.noiser = noiser
         self.device = device
+        prompt = config.text_prompt
         if config.mode == 'vp':
-            self.edm = Denoiser_EDM_Latent(model, device, **config.common_kwargs, **config.vp_kwargs, mode='pfode')
+            self.edm = Denoiser_EDM_Latent(device, prompt, **config.common_kwargs, **config.vp_kwargs, mode='pfode')
         elif config.mode == 've':
-            self.edm = Denoiser_EDM_Latent(model, device, **config.common_kwargs, **config.ve_kwargs, mode='pfode')
+            self.edm = Denoiser_EDM_Latent(device, prompt, **config.common_kwargs, **config.ve_kwargs, mode='pfode')
         elif config.mode == 'iddpm':
-            self.edm = Denoiser_EDM_Latent(model, device, **config.common_kwargs, **config.iddpm_kwargs, mode='pfode')
+            self.edm = Denoiser_EDM_Latent(device, prompt, **config.common_kwargs, **config.iddpm_kwargs, mode='pfode')
         elif config.mode == 'edm':
-            self.edm = Denoiser_EDM_Latent(model, device, **config.common_kwargs, **config.edm_kwargs, mode='pfode')
+            self.edm = Denoiser_EDM_Latent(device, prompt, **config.common_kwargs, **config.edm_kwargs, mode='pfode')
         elif config.mode == 'vp_sde':
-            self.edm = Denoiser_EDM_Latent(model, device, **config.common_kwargs, **config.vp_kwargs, mode='sde')
+            self.edm = Denoiser_EDM_Latent(device, prompt, **config.common_kwargs, **config.vp_kwargs, mode='sde')
         elif config.mode == 've_sde':
-            self.edm = Denoiser_EDM_Latent(model, device, **config.common_kwargs, **config.ve_kwargs, mode='sde')
+            self.edm = Denoiser_EDM_Latent(device, prompt, **config.common_kwargs, **config.ve_kwargs, mode='sde')
         elif config.mode == 'iddpm_sde':
-            self.edm = Denoiser_EDM_Latent(model, device, **config.common_kwargs, **config.iddpm_kwargs, mode='sde')
+            self.edm = Denoiser_EDM_Latent(device, prompt, **config.common_kwargs, **config.iddpm_kwargs, mode='sde')
         elif config.mode == 'edm_sde':
-            self.edm = Denoiser_EDM_Latent(model, device, **config.common_kwargs, **config.edm_kwargs, mode='sde')
+            self.edm = Denoiser_EDM_Latent(device, prompt, **config.common_kwargs, **config.edm_kwargs, mode='sde')
         else:
             raise NotImplementedError(f"Mode {self.config.mode} is not implemented (must be latent_sde for pnp_edm_latent)")
 

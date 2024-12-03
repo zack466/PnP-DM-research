@@ -29,7 +29,7 @@ from torchvision.io import read_image as tv_read_image
 
 
 class StableDiffusionPrecond:
-    def __init__(self, device, **kwargs):
+    def __init__(self, device, text_prompt, **kwargs):
 
         self.device = device
 
@@ -44,15 +44,14 @@ class StableDiffusionPrecond:
 
         assert self.pipeline.scheduler.beta_schedule == "scaled_linear"
 
-        self.M = self.pipeline.scheduler.num_train_timesteps
-        self.steps_offset = self.pipeline.scheduler.steps_offset
-        self.beta_s = self.pipeline.scheduler.beta_start * self.M
-        self.beta_e = self.pipeline.scheduler.beta_end * self.M
+        self.M = self.pipeline.scheduler.config.num_train_timesteps
+        self.steps_offset = self.pipeline.scheduler.config.steps_offset
+        self.beta_s = self.pipeline.scheduler.config.beta_start * self.M
+        self.beta_e = self.pipeline.scheduler.config.beta_end * self.M
         self.beta_d = self.beta_e**0.5 - self.beta_s**0.5
 
-        # text encoding?
-        prompt = [
-            "harvey specter from suits"]
+        # text encoding
+        prompt = [text_prompt]
         text_input = self.tokenizer(
             prompt, padding="max_length", max_length=self.tokenizer.model_max_length, truncation=True, return_tensors="pt")
         text_embeddings = self.text_encoder(
@@ -107,8 +106,8 @@ class StableDiffusionPrecond:
 class Denoiser_EDM_Latent():
     def __init__(
         self,
-        throwaway,
         device,
+        text_prompt,
         num_steps=18,
         sigma_min=None,
         sigma_max=None,
@@ -128,7 +127,7 @@ class Denoiser_EDM_Latent():
         S_noise=1,
         mode='sde'
     ):
-        self.net = StableDiffusionPrecond(device)
+        self.net = StableDiffusionPrecond(device, text_prompt)
         self.device = device
         self.num_steps = num_steps
         self.sigma_min = sigma_min
@@ -308,26 +307,25 @@ class Denoiser_EDM_Latent():
                          255.0, device=self.device)[None, :3, :, :]
         return img*2-1
 
-if __name__ == "__main__":
-    device = torch.device("cuda")
-    model = Denoiser_EDM_Latent(None, device, num_steps=100)
-
-    x_clean = read_image("images/00003.png")
-    xlist = model(x_clean, 10)
-    exit()
-
-    D = StableDiffusionPrecond(device)
-    def encode(x): return D.vae.encode(2*x - 1).latent_dist.sample() * 0.18215
-    def decode(z): return D.vae.decode(z / 0.18215).sample / 2 + 0.5
-
-    x = torch.tensor(read_image("images/00003.png") /
-                     255.0, device=device)[None, :3, :, :]
-
-    z = encode(x)
-    noise = torch.randn(1, 4, 256//8, 256//8, device=device) * 1
-    z_noisy = z + noise
-
-    z_clean = D(z_noisy, 1)
-
-    save_image(decode(z_noisy), f"noisy.png")
-    save_image(decode(z_clean), f"clean.png")
+# if __name__ == "__main__":
+#     device = torch.device("cuda")
+#     model = Denoiser_EDM_Latent(None, device, num_steps=100)
+#
+#     x_clean = read_image("images/00003.png")
+#     xlist = model(x_clean, 10)
+#
+#     D = StableDiffusionPrecond(device)
+#     def encode(x): return D.vae.encode(2*x - 1).latent_dist.sample() * 0.18215
+#     def decode(z): return D.vae.decode(z / 0.18215).sample / 2 + 0.5
+#
+#     x = torch.tensor(read_image("images/00003.png") /
+#                      255.0, device=device)[None, :3, :, :]
+#
+#     z = encode(x)
+#     noise = torch.randn(1, 4, 256//8, 256//8, device=device) * 1
+#     z_noisy = z + noise
+#
+#     z_clean = D(z_noisy, 1)
+#
+#     save_image(decode(z_noisy), f"noisy.png")
+#     save_image(decode(z_clean), f"clean.png")

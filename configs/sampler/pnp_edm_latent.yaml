@@ -6,6 +6,7 @@ rho: 0.1
 rho_decay_rate: 1.0
 rho_min: 0.0
 num_samples_per_run: 20
+text_prompt: ""
 common_kwargs:
   num_steps: 100
   sigma_min: null

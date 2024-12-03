@@ -89,12 +89,10 @@ class StableDiffusionPrecond:
     # expects t in [0, 1)
     # Note: this is the alpha's used in the noise derivation, not the noise schedule
     def alpha(self, t):
-        t = torch.tensor(t)
         return self.beta_s * t + self.beta_s**0.5 * self.beta_d * t**2 + (self.beta_d**2.0 / 3.0) * t**3
 
     # expects t in [0, M)
     def sigma(self, t):
-        t = torch.tensor(t)
         return (torch.exp(self.alpha((t + self.steps_offset) / self.M)) - 1).sqrt()
 
     # returns t in [0, M)

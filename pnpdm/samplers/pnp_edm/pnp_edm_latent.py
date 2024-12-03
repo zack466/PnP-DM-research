@@ -135,7 +135,7 @@ class PnPEDMLatent:
         plt.imsave(os.path.join(save_root, 'progress', fname+"_x_and_z.png"), xz_save, cmap=cmap)
         np.save(os.path.join(save_root, 'progress', fname+"_log.npy"), log)
 
-        return torch.concat(samples, dim=0)
+        return torch.concat(samples, dim=0).to(self.device)
 
 # class Mode:
 #     mode = "edm_sde"

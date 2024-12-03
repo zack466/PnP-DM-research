@@ -40,7 +40,7 @@ class PnPEDMLatent:
     def proximal_generator(self, x, y, sigma, rho, gamma=2e-4, num_iters=200):
         z = x
         z.requires_grad = True
-        for _ in tqdm(range(num_iters)):
+        for _ in range(num_iters):
             # forward operator is A(D(z))
             data_fit = (self.operator.forward(self.edm.decode_image(z)) - y).norm()**2 / (2*sigma**2)
             grad = torch.autograd.grad(outputs=data_fit, inputs=z)[0]

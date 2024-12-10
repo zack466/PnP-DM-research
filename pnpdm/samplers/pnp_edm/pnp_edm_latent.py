@@ -46,7 +46,9 @@ class PnPEDMLatent:
     # the likelihood step
     # we need to use this regardless of the operator because the decoder
     # is part of the forward model in our formulation
-    def proximal_generator(self, x, y, sigma, rho, gamma=2e-4, num_iters=200):
+    def proximal_generator(self, x, y, sigma, rho, gamma=2e-4, num_iters=225):
+        gamma = self.config.gamma
+        num_iters = self.config.proximal_num_iters
         z = x
         z.requires_grad = True
         for _ in range(num_iters):

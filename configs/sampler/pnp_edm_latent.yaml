@@ -6,6 +6,8 @@ rho: 0.1
 rho_decay_rate: 1.0
 rho_min: 0.0
 num_samples_per_run: 20
+gamma: 2e-4
+proximal_num_iters: 225
 text_prompt: ""
 common_kwargs:
   num_steps: 100

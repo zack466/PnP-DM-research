@@ -6,6 +6,7 @@ python posterior_sample.py +data=ffhq +task=super_resolution_svd +model=edm_unet
        sampler.mode=edm_sde sampler.rho=10 sampler.rho_decay_rate=0.9 sampler.rho_min=0.3 gpu=0 add_exp_name=superresolution \
        sampler.text_prompt='a painting in the style of van gogh'
 ```
+Note that `+sampler=pnp_edm_latent` means that our sampler will be used, and `sampler.text_prompt` allows for setting the text prompt of the run.
 
 # Code for "Principled Probabilistic Imaging using Diffusion Models as Plug-and-Play Priors"
 

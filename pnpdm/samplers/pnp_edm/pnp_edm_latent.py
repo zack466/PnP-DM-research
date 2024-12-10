@@ -8,6 +8,11 @@ from collections import defaultdict
 from .denoiser_latent_edm import Denoiser_EDM_Latent
 
 class PnPEDMLatent:
+    """
+    Run our latent version of PnP-DM. This is very similar to the original
+    versions with modifications to the likelihood and prior steps which allow
+    the algorithm to run in latent space.
+    """
     def __init__(self, config, model, operator, noiser, device):
         self.config = config
         self.model = model
@@ -38,6 +43,9 @@ class PnPEDMLatent:
     def display_name(self):
         return f'pnp-edm-latent-{self.config.mode}-rho0={self.config.rho}-rhomin={self.config.rho_min}'
 
+    # the likelihood step
+    # we need to use this regardless of the operator because the decoder
+    # is part of the forward model in our formulation
     def proximal_generator(self, x, y, sigma, rho, gamma=2e-4, num_iters=200):
         z = x
         z.requires_grad = True
@@ -137,27 +145,3 @@ class PnPEDMLatent:
         np.save(os.path.join(save_root, 'progress', fname+"_log.npy"), log)
 
         return torch.concat(samples, dim=0).to(self.device)
-
-# class Mode:
-#     mode = "edm_sde"
-#     common_kwargs = {}
-#     edm_kwargs = {}
-#
-# if __name__ == "__main__":
-#     device = torch.device("cuda")
-#     operator = GaussialBlurCircular(61, 7.0, 3, 256, device)
-#     noiser = GaussianNoise(0.05)
-#     pnp = PnPEDMLatent(Mode(), None, operator, noiser, device)
-#
-#     gt = pnp.edm.read_image("images/00003.png")
-#     y = noiser.forward(operator.forward(gt))
-#
-#     encoded = pnp.edm.read_image("images/00003.png")
-#     encoded = pnp.edm.encode_image(encoded)
-#     encoded = torch.zeros_like(encoded)
-#
-#     rho = 2
-#     likelihood = pnp.proximal_generator(encoded, y, noiser.sigma, rho)
-#
-#     pnp.edm.save_image(pnp.edm.encode_image(gt) + torch.randn_like(encoded)*rho, "encoded.png")
-#     pnp.edm.save_image(likelihood, "likelihood.png")

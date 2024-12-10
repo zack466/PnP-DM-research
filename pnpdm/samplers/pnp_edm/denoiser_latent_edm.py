@@ -1,26 +1,3 @@
-# https://huggingface.co/stable-diffusion-v1-5/stable-diffusion-v1-5/tree/main
-# - See files and versions, see json configs about architectures about UNet/VAE/Encoder
-# - All these thigns we need to load to our repo
-# - There's no script or code that does it, but the API
-# - `diffuser` package has DDPM pipeline
-# - pipeline_utils
-#     - from_pretrained method
-#     - Line like 780 or something seems important
-#     - Loading in 868
-#     - Take necessary components in this functions to PNPDM
-#         - VAE, UNet
-# - Easier way is probably to install diffuser package and write another pipeline that inherits Diffusion Pipeline
-#     - Then modify some things
-#     - Make "EDMDenoiserPipeline" from DDPMPipeline
-#     - Call function from this should be your prior step
-#         - image input and rho :(
-#         - Right now, makes random vector and goes through entire diffusion process
-#         - When you do call, make it the prior step of PnPDM
-#         - Add arguments z and rho, migrate call step from PnPDM to this call function
-# - Run with PnPDM to just test it working then integrate preconditioning to make sure it works
-
-# preconditionng on unet
-# [for loop} replace with algorhtm 3
 from diffusers import StableDiffusionPipeline
 import torch
 import numpy as np
@@ -29,13 +6,16 @@ from torchvision.io import read_image as tv_read_image
 
 
 class StableDiffusionPrecond:
+    """
+    Precondition the lambdalabs/miniSD-diffusers model to create
+    a denoiser as described in the EDM framework. Takes a fixed text
+    prompt which describes the expected output image.
+    """
     def __init__(self, device, text_prompt, **kwargs):
 
         self.device = device
 
-        # loading in diffusion model
-        # self.pipeline = StableDiffusionPipeline.from_pretrained(
-        #     "stable-diffusion-v1-5/stable-diffusion-v1-5")
+        # load diffusion model pipeline and extract components
         self.pipeline = StableDiffusionPipeline.from_pretrained("lambdalabs/miniSD-diffusers")
         self.unet = self.pipeline.unet.to(device)
         self.vae = self.pipeline.vae.to(device)
@@ -50,7 +30,7 @@ class StableDiffusionPrecond:
         self.beta_e = self.pipeline.scheduler.config.beta_end * self.M
         self.beta_d = self.beta_e**0.5 - self.beta_s**0.5
 
-        # text encoding
+        # setup text prompt embeddings
         prompt = [text_prompt]
         text_input = self.tokenizer(
             prompt, padding="max_length", max_length=self.tokenizer.model_max_length, truncation=True, return_tensors="pt")
@@ -90,6 +70,7 @@ class StableDiffusionPrecond:
     def alpha(self, t):
         return self.beta_s * t + self.beta_s**0.5 * self.beta_d * t**2 + (self.beta_d**2.0 / 3.0) * t**3
 
+    # noise level as a function of t
     # expects t in [0, M)
     def sigma(self, t):
         return (torch.exp(self.alpha((t + self.steps_offset) / self.M)) - 1).sqrt()
@@ -127,6 +108,10 @@ class Denoiser_EDM_Latent():
         S_noise=1,
         mode='sde'
     ):
+        """
+        A latent diffusion sampler using the preconditioned model. This can
+        also perform image generation starting from partially denoised images.
+        """
         self.net = StableDiffusionPrecond(device, text_prompt)
         self.device = device
         self.num_steps = num_steps
@@ -242,14 +227,13 @@ class Denoiser_EDM_Latent():
         self.t_steps = torch.cat(
             [t_steps, torch.zeros_like(t_steps[:1])])  # t_N = 0
 
-    # encode image to latent space and possibly add noise
-    def encode_image(self, img, image_noise_t=0, latent_noise_t=0):
+    # encode image to latent space, never use torch grad
+    def encode_image(self, img):
         with torch.no_grad():
-            # img = self.s(image_noise_t)*img + self.sigma(image_noise_t)*self.s(image_noise_t)*torch.randn_like(img)
             encoded = self.net.vae.encode(img).latent_dist.sample() * 0.18215
-            # encoded = self.s(latent_noise_t)*encoded + self.sigma(latent_noise_t)*self.s(latent_noise_t)*torch.randn_like(encoded)
             return encoded
 
+    # decode latent to image space, we need the grad for our likelihood step
     def decode_image(self, latents):
         decoded = self.net.vae.decode(latents / 0.18215).sample
         return decoded
@@ -260,14 +244,11 @@ class Denoiser_EDM_Latent():
         i_start = torch.min(torch.nonzero(self.sigma(self.t_steps) < eta))
 
         # Main sampling loop. (starting from t_start with state initialized at x_noisy)
-        # image noise controls how much noise in image space is added (based on the latent timestep)
-        # latent noise controls how muhc noise in latent space is added (should equal eta if image noise is 0)
-        # x_next = self.encode_image(x_noisy, image_noise_t=0, latent_noise_t=0)
         x_next = z_noisy * self.s(self.t_steps[i_start])
 
         # uncomment this and set eta to inf to automatically run from pure noise every time
-        # x_next = torch.randn(1, 4, 512//8, 512//8, device=self.device) * \
-        #     self.s(self.t_steps[i_start]) * self.sigma(self.t_steps[i_start])
+        # x_next = torch.randn(1, 4, 256//8, 256//8, device=self.device) * \
+            # self.s(self.t_steps[i_start]) * self.sigma(self.t_steps[i_start])
 
         # 0, ..., N-1
         for i, (t_cur, t_next) in enumerate(zip(self.t_steps[:-1], self.t_steps[1:])):
@@ -307,25 +288,17 @@ class Denoiser_EDM_Latent():
                          255.0, device=self.device)[None, :3, :, :]
         return img*2-1
 
-# if __name__ == "__main__":
-#     device = torch.device("cuda")
-#     model = Denoiser_EDM_Latent(None, device, num_steps=100)
-#
-#     x_clean = read_image("images/00003.png")
-#     xlist = model(x_clean, 10)
-#
-#     D = StableDiffusionPrecond(device)
-#     def encode(x): return D.vae.encode(2*x - 1).latent_dist.sample() * 0.18215
-#     def decode(z): return D.vae.decode(z / 0.18215).sample / 2 + 0.5
-#
-#     x = torch.tensor(read_image("images/00003.png") /
-#                      255.0, device=device)[None, :3, :, :]
-#
-#     z = encode(x)
-#     noise = torch.randn(1, 4, 256//8, 256//8, device=device) * 1
-#     z_noisy = z + noise
-#
-#     z_clean = D(z_noisy, 1)
-#
-#     save_image(decode(z_noisy), f"noisy.png")
-#     save_image(decode(z_clean), f"clean.png")
+if __name__ == "__main__":
+    device = torch.device("cuda")
+    model = Denoiser_EDM_Latent(device, "boy with a tree behind him", num_steps=100)
+
+    x_clean = model.read_image("images/00014.png")
+    z_clean = model.encode_image(x_clean)
+
+    sigma = 1
+    z_noisy = z_clean + sigma * torch.randn_like(z_clean)
+    model.save_image(model.decode_image(z_noisy), "noised.png")
+    z_denoised = model(z_noisy, sigma)
+    x_denoised = model.decode_image(z_denoised)
+
+    model.save_image(x_denoised, "denoised.png")

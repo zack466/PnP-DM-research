@@ -8,6 +8,8 @@ python posterior_sample.py +data=ffhq +task=super_resolution_svd +model=edm_unet
 ```
 Note that `+sampler=pnp_edm_latent` means that our sampler will be used, and `sampler.text_prompt` allows for setting the text prompt of the run.
 
+We also implemented the fourier subsampling forward operator in this repository. This can be run using `+task=fourier_subsampling`.
+
 # Code for "Principled Probabilistic Imaging using Diffusion Models as Plug-and-Play Priors"
 
 ### 1) Install packages

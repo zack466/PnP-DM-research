@@ -1,3 +1,13 @@
+# CS 163 Project Notes
+
+Our codebase is an extension of the original PnP-DM codebase. The main changes we made were adding a new denoiser which uses a preconditioned stable diffusion model and adding a new sampler which modifies the PnP-DM algorithm as described in our report. To run our algorithm for solving inverse problems with text conditioning, set up the repository as normal and use commands of the form:
+```
+python posterior_sample.py +data=ffhq +task=super_resolution_svd +model=edm_unet_adm_dps_ffhq +sampler=pnp_edm_latent \
+       sampler.mode=edm_sde sampler.rho=10 sampler.rho_decay_rate=0.9 sampler.rho_min=0.3 gpu=0 add_exp_name=superresolution \
+       sampler.text_prompt='a painting in the style of van gogh'
+```
+Note that `+sampler=pnp_edm_latent` means that our sampler will be used, and `sampler.text_prompt` allows for setting the text prompt of the run.
+
 # Code for "Principled Probabilistic Imaging using Diffusion Models as Plug-and-Play Priors"
 
 ### 1) Install packages

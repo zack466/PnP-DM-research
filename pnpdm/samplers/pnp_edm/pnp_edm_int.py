@@ -4,15 +4,16 @@ import matplotlib.pyplot as plt
 from tqdm import tqdm
 from collections import defaultdict
 from .denoiser_edm import Denoiser_EDM
-from .denoiser_latent_edm import Denoiser_EDM_Latent
+from diffusers import UNet2DModel, DDPMScheduler
 
-class PnPEDM:
+class PnPEDMINT:
     def __init__(self, config, model, operator, noiser, device):
         self.config = config
         self.model = model
         self.operator = operator
         self.noiser = noiser
         self.device = device
+        self.scheduler = DDPMScheduler.from_pretrained("google/ddpm-celebahq-256")
         if config.mode == 'vp':
             self.edm = Denoiser_EDM(model, device, **config.common_kwargs, **config.vp_kwargs, mode='pfode')
         elif config.mode == 've':
@@ -69,13 +70,20 @@ class PnPEDM:
         )[1:]
         assert self.config.num_iters-1 in iters_count_as_sample, "num_iters-1 should be included in iters_count_as_sample"
         sub_pbar = tqdm(range(self.config.num_iters))
+        count = 0
         for i in sub_pbar:
+            print(count)
             rho_iter = self.config.rho * (self.config.rho_decay_rate**i)
             rho_iter = max(rho_iter, self.config.rho_min)
 
             # likelihood step
             z = self.operator.proximal_generator(x, y_n, self.noiser.sigma, rho_iter)
-        
+
+            # adding noise
+            ts = int(self.scheduler.config.num_train_timesteps * 0.1)
+            noise = torch.randn_like(z).to(self.device)
+            z = self.scheduler.add_noise(z, noise=noise, timesteps=torch.tensor([ts]))
+
             # prior step
             x = self.edm(z, rho_iter)
 
@@ -92,12 +100,10 @@ class PnPEDM:
             if i % (self.config.num_iters//10) == 0:
                 xs_save = torch.cat((xs_save, x_save), dim=-1)
                 zs_save = torch.cat((zs_save, z_save), dim=-1)
-
-            # plt.imsave(os.path.join(save_root, 'progress', fname+f"x-{i}.png"), x_save.permute(0, 2, 3, 1).squeeze().cpu().numpy(), cmap=cmap)
-            # plt.imsave(os.path.join(save_root, 'progress', fname+f"z-{i}.png"), z_save.permute(0, 2, 3, 1).squeeze().cpu().numpy(), cmap=cmap)
             
             if record:
                 log["x"].append(x_save.permute(0, 2, 3, 1).squeeze().cpu().numpy())
+            count += 1
 
         plt.figure(figsize=(20, 5))
         plt.subplot(1, 3, 1)
@@ -120,7 +126,7 @@ class PnPEDM:
         return torch.concat(samples, dim=0)
 
 
-class PnPEDMBatch(PnPEDM):
+class PnPEDMBatchINT(PnPEDMINT):
     @property
     def display_name(self):
         return f'pnp-edm-batch-{self.config.mode}-rho0={self.config.rho}-rhomin={self.config.rho_min}'
@@ -137,6 +143,11 @@ class PnPEDMBatch(PnPEDM):
 
             # likelihood step
             z = self.operator.proximal_generator(x, y_n, self.noiser.sigma, rho_iter)
+
+            # Add noise 
+            ts = int(self.scheduler.config.num_train_timesteps * 0.1)
+            noise = torch.randn_like(z).to(self.device)
+            z = self.scheduler.add_noise(z, noise=noise, timesteps=torch.tensor([ts]))
 
             # prior step
             x = self.edm(z, rho_iter)

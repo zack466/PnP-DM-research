@@ -130,9 +130,6 @@ class Denoiser_EDM:
         # Main sampling loop. (starting from t_start with state initialized at x_noisy)
         x_next = x_noisy * self.s(self.t_steps[i_start])
         
-        # save all x_next into a list and save it
-        x_next_list = []
-        x_next_list.append(x_next)
         for i, (t_cur, t_next) in enumerate(zip(self.t_steps[:-1], self.t_steps[1:])): # 0, ..., N-1
             if i < i_start:
                 # Skip the steps before i_start.

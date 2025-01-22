@@ -43,20 +43,40 @@ class PnPEDMLatent:
     def display_name(self):
         return f'pnp-edm-latent-{self.config.mode}-rho0={self.config.rho}-rhomin={self.config.rho_min}'
 
+    # - grad log p(x)
+    def force(self, x_cur, x_initial, y, sigma, rho):
+        # forward operator is A(D(z))
+        data_fit = (self.operator.forward(self.edm.decode_image(x_cur)) - y).norm()**2 / (2*sigma**2)
+        grad = torch.autograd.grad(outputs=data_fit, inputs=x_cur)[0]
+        return (grad + (x_cur - x_initial)/rho**2)
+
     # the likelihood step
     # we need to use this regardless of the operator because the decoder
     # is part of the forward model in our formulation
-    def proximal_generator(self, x, y, sigma, rho):
+    def proximal_generator(self, x_initial, y, sigma, rho):
+        M = 2
         gamma = self.config.gamma
         num_iters = self.config.proximal_num_iters
-        z = x
-        z.requires_grad = True
-        for _ in range(num_iters):
-            # forward operator is A(D(z))
-            data_fit = (self.operator.forward(self.edm.decode_image(z)) - y).norm()**2 / (2*sigma**2)
-            grad = torch.autograd.grad(outputs=data_fit, inputs=z)[0]
-            z = z - gamma * grad - (gamma/rho**2) * (z - x) #+ np.sqrt(2*gamma) * torch.randn_like(x)
-        return z.type(torch.float32) + rho * torch.randn_like(x)
+
+        x_cur = x_initial.clone()
+        x_cur.requires_grad = True
+        for i in range(1):
+            x0 = x_cur.clone()
+
+            w = torch.randn_like(x_initial) / M
+            w.requires_grad = False
+
+            w = w - gamma / 2 * self.force(x_cur, x_initial, y, sigma, rho)
+            for _ in range(num_iters):
+                # x_cur = x_cur - gamma * self.potential(x_cur, x_initial, y, sigma, rho)
+                x_cur = x_cur + gamma * w
+                w = w - gamma * self.force(x_cur, x_initial, y, sigma, rho)
+            x_cur = x_cur + gamma * w
+            w = w - gamma / 2 * self.force(x_cur, x_initial, y, sigma, rho)
+
+            # TODO: acceptance probability using x_cur and x0
+
+        return x_cur.type(torch.float32) + rho * torch.randn_like(x_initial)
 
     def __call__(self, gt, y_n, record=False, fname=None, save_root=None, inv_transform=None, metrics={}):
         assert inv_transform is not None, "inv_transform cannot be None"

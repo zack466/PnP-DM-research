@@ -46,37 +46,50 @@ class PnPEDMLatent:
     # - grad log p(x)
     def force(self, x_cur, x_initial, y, sigma, rho):
         # forward operator is A(D(z))
-        data_fit = (self.operator.forward(self.edm.decode_image(x_cur)) - y).norm()**2 / (2*sigma**2)
-        grad = torch.autograd.grad(outputs=data_fit, inputs=x_cur)[0]
+        x_cur2 = x_cur.clone()
+        x_cur2.requires_grad = True
+        data_fit = (self.operator.forward(self.edm.decode_image(x_cur2)) - y).norm()**2 / (2*sigma**2)
+        grad = torch.autograd.grad(outputs=data_fit, inputs=x_cur2)[0]
         return (grad + (x_cur - x_initial)/rho**2)
 
     # the likelihood step
     # we need to use this regardless of the operator because the decoder
     # is part of the forward model in our formulation
     def proximal_generator(self, x_initial, y, sigma, rho):
-        M = 2
-        gamma = self.config.gamma
-        num_iters = self.config.proximal_num_iters
+        num_iters = 20
+        delta = 0.01
+        gamma = 2
+        vel_scale = 3
 
-        x_cur = x_initial.clone()
-        x_cur.requires_grad = True
-        for i in range(1):
-            x0 = x_cur.clone()
+        # for underdamped Langevin, we have
+        # K = 1, 1 - eta = gamma*delta + o(delta)
+        K = 1
+        eta = 1 - gamma*delta
 
-            w = torch.randn_like(x_initial) / M
-            w.requires_grad = False
+        # initialize position
+        x = x_initial.clone()
+        x.requires_grad = False
 
-            w = w - gamma / 2 * self.force(x_cur, x_initial, y, sigma, rho)
-            for _ in range(num_iters):
-                # x_cur = x_cur - gamma * self.potential(x_cur, x_initial, y, sigma, rho)
-                x_cur = x_cur + gamma * w
-                w = w - gamma * self.force(x_cur, x_initial, y, sigma, rho)
-            x_cur = x_cur + gamma * w
-            w = w - gamma / 2 * self.force(x_cur, x_initial, y, sigma, rho)
+        # initialize velocity
+        v = torch.randn_like(x_initial) * vel_scale
+        v.requires_grad = False
 
-            # TODO: acceptance probability using x_cur and x0
+        for i in range(num_iters):
+            for _ in range(K):
+                x += delta/2 * v
+                v += - delta * self.force(x, x_initial, y, sigma, rho)
+                x += delta/2 * v
 
-        return x_cur.type(torch.float32) + rho * torch.randn_like(x_initial)
+            v = eta*v + np.sqrt(1 - eta**2) * torch.randn_like(v)
+
+            if i % 10 == 0:
+                print(f"iteration {i} of likelihood")
+                print(f"mag of v is {v.norm()}")
+                print(f"mag of x is {x.norm()}")
+                self.edm.save_image(self.edm.decode_image(x), f"likelihood_{i}.png")
+
+
+        return x + rho * torch.randn_like(x)
 
     def __call__(self, gt, y_n, record=False, fname=None, save_root=None, inv_transform=None, metrics={}):
         assert inv_transform is not None, "inv_transform cannot be None"

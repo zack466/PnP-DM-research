@@ -16,12 +16,11 @@ class StableDiffusionPrecond:
         self.device = device
 
         # load diffusion model pipeline and extract components
-        self.pipeline = StableDiffusionPipeline.from_pretrained("lambdalabs/miniSD-diffusers")
+        self.pipeline = StableDiffusionPipeline.from_pretrained("stable-diffusion-v1-5/stable-diffusion-v1-5")
         self.unet = self.pipeline.unet.to(device)
         self.vae = self.pipeline.vae.to(device)
         self.tokenizer = self.pipeline.tokenizer
         self.text_encoder = self.pipeline.text_encoder.to(self.device)
-
         assert self.pipeline.scheduler.beta_schedule == "scaled_linear"
 
         self.M = self.pipeline.scheduler.config.num_train_timesteps

@@ -42,7 +42,7 @@ class PnPEDMLatent:
     @property
     def display_name(self):
         return f'pnp-edm-latent-{self.config.mode}-rho0={self.config.rho}-rhomin={self.config.rho_min}'
-
+    
     # the likelihood step
     # we need to use this regardless of the operator because the decoder
     # is part of the forward model in our formulation
@@ -51,12 +51,21 @@ class PnPEDMLatent:
         num_iters = self.config.proximal_num_iters
         z = x
         z.requires_grad = True
-        for _ in range(num_iters):
+        velocity = torch.randn_like(x)
+        momentum = 0.45
+        gamma = 2e-4
+        for _ in range(225):
             # forward operator is A(D(z))
             data_fit = (self.operator.forward(self.edm.decode_image(z)) - y).norm()**2 / (2*sigma**2)
             grad = torch.autograd.grad(outputs=data_fit, inputs=z)[0]
-            z = z - gamma * grad - (gamma/rho**2) * (z - x) #+ np.sqrt(2*gamma) * torch.randn_like(x)
+            cur_score = - grad - (1/rho**2) * (z - x) # + np.sqrt(2*gamma) * torch.randn_like(x)
+            step_size = np.sqrt(gamma)
+            epsilon = torch.randn_like(x)
+            velocity = momentum * velocity + step_size * cur_score + np.sqrt(2 * (1 - momentum)) * epsilon
+            z = z + velocity * step_size
+
         return z.type(torch.float32) + rho * torch.randn_like(x)
+
 
     def __call__(self, gt, y_n, record=False, fname=None, save_root=None, inv_transform=None, metrics={}):
         assert inv_transform is not None, "inv_transform cannot be None"

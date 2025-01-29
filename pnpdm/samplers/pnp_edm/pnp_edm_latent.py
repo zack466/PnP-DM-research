@@ -43,7 +43,7 @@ class PnPEDMLatent:
     def display_name(self):
         return f'pnp-edm-latent-{self.config.mode}-rho0={self.config.rho}-rhomin={self.config.rho_min}'
 
-    # - grad log p(x)
+    # - grad U
     def force(self, x_cur, x_initial, y, sigma, rho):
         # forward operator is A(D(z))
         x_cur2 = x_cur.clone()

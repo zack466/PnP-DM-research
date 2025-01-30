@@ -237,6 +237,8 @@ class Denoiser_EDM_Latent():
 
     # encode image to latent space, never use torch grad
     def encode_image(self, img):
+        assert img.shape == torch.Size([1, 3, self.image_size, self.image_size]), \
+            f"image size is {img.shape} but expected to be 1x3x{self.image_size}x{self.image_size}"
         with torch.no_grad():
             encoded = self.net.vae.encode(img).latent_dist.sample() * 0.18215
             return encoded

@@ -18,6 +18,8 @@ class StableDiffusionPrecond:
         # load diffusion model pipeline and extract components
         self.pipeline = StableDiffusionPipeline.from_pretrained("stable-diffusion-v1-5/stable-diffusion-v1-5")
         self.unet = self.pipeline.unet.to(device)
+        # converting unet to float16
+        self.unet.half()
         self.vae = self.pipeline.vae.to(device)
         self.tokenizer = self.pipeline.tokenizer
         self.text_encoder = self.pipeline.text_encoder.to(self.device)
@@ -42,7 +44,8 @@ class StableDiffusionPrecond:
             uncond_input.input_ids.to(self.device))[0]
         self.encoder_hidden_states = torch.cat(
             [uncond_embeddings, text_embeddings])
-
+        # convert to float16
+        self.encoder_hidden_states = self.encoder_hidden_states.to(torch.float16)
         self.all_sigma = self.sigma(torch.arange(self.M)).to(self.device)
         self.sigma_min = self.sigma_inv(0).item()
         self.sigma_max = self.sigma_inv(self.M).item()
@@ -242,8 +245,17 @@ class Denoiser_EDM_Latent():
         # find the smallest t such that sigma(t) < eta
         i_start = torch.min(torch.nonzero(self.sigma(self.t_steps) < eta))
 
-        # Main sampling loop. (starting from t_start with state initialized at x_noisy)
-        x_next = z_noisy * self.s(self.t_steps[i_start])
+        # Get the next time step (one step larger sigma)
+        next_t = self.t_steps[i_start - 1] if i_start > 0 else self.t_steps[0]
+        
+        next_sigma = self.sigma(next_t)
+        target_sigma = eta
+        
+        #  missing noise using variance difference
+        missing_noise = torch.sqrt(next_sigma**2 - target_sigma**2)
+        
+        new_z_noisy = z_noisy + missing_noise * torch.randn_like(z_noisy)
+        x_next = new_z_noisy * self.s(self.t_steps[i_start])
 
         # uncomment this and set eta to inf to automatically run from pure noise every time
         # x_next = torch.randn(1, 4, 256//8, 256//8, device=self.device) * \
@@ -258,10 +270,12 @@ class Denoiser_EDM_Latent():
             x_cur = x_next
             t_cur = t_cur
 
+
             # Euler step.
             lmbd = 2 if self.mode == 'sde' else 1
+
             denoised = self.net(x_cur / self.s(t_cur),
-                                self.sigma(t_cur)).to(torch.float32)
+                                self.sigma(t_cur)).to(torch.float16)
             d_cur = (lmbd * self.sigma_deriv(t_cur) / self.sigma(t_cur) + self.s_deriv(t_cur) / self.s(t_cur)) * x_cur - \
                 lmbd * self.sigma_deriv(t_cur) * self.s(t_cur) / \
                 self.sigma(t_cur) * denoised

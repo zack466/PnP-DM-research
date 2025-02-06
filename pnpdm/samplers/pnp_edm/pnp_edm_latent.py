@@ -57,8 +57,8 @@ class PnPEDMLatent:
     # is part of the forward model in our formulation
     def proximal_generator(self, x_initial, y, sigma, rho):
         num_iters = 20
-        delta = 0.01
-        gamma = 2
+        delta = 0.05
+        gamma = 20
         vel_scale = 3
 
         # for underdamped Langevin, we have
@@ -90,6 +90,20 @@ class PnPEDMLatent:
 
 
         return x + rho * torch.randn_like(x)
+
+    # Langevin Sampling
+    # def proximal_generator(self, x, y, sigma, rho):
+    #     gamma = self.config.gamma
+    #     num_iters = self.config.proximal_num_iters
+    #     z = x
+    #     z.requires_grad = True
+    #     for _ in range(num_iters):
+    #         # forward operator is A(D(z))
+    #         data_fit = (self.operator.forward(self.edm.decode_image(z)) - y).norm()**2 / (2*sigma**2)
+    #         grad = torch.autograd.grad(outputs=data_fit, inputs=z)[0]
+    #         z = z - gamma * grad - (gamma/rho**2) * (z - x) #+ np.sqrt(2*gamma) * torch.randn_like(x)
+    #     return z.type(torch.float16) + rho * torch.randn_like(x)
+
 
     def __call__(self, gt, y_n, record=False, fname=None, save_root=None, inv_transform=None, metrics={}):
         assert inv_transform is not None, "inv_transform cannot be None"
@@ -136,8 +150,14 @@ class PnPEDMLatent:
             z = self.edm.decode_image(z_latent)
         
             # prior step
+            #convert to float16
+            z_latent = z_latent.to(torch.float16)
             x_latent = self.edm(z_latent, rho_iter)
+            #convert back to float32
+            x_latent = x_latent.to(torch.float32)
             x = self.edm.decode_image(x_latent)
+            
+
 
             if i in iters_count_as_sample:
                 samples.append(x.detach().cpu())

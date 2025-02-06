@@ -2,7 +2,9 @@ from diffusers import StableDiffusionPipeline
 import torch
 import numpy as np
 from torchvision.utils import save_image as tv_save_image
+from torchvision.utils import make_grid as tv_make_grid
 from torchvision.io import read_image as tv_read_image
+from torchvision.transforms.functional import resize as tv_resize
 
 
 class StableDiffusionPrecond:
@@ -11,12 +13,13 @@ class StableDiffusionPrecond:
     a denoiser as described in the EDM framework. Takes a fixed text
     prompt which describes the expected output image.
     """
-    def __init__(self, device, text_prompt, **kwargs):
 
+    def __init__(self, device, model_name, **kwargs):
         self.device = device
 
         # load diffusion model pipeline and extract components
-        self.pipeline = StableDiffusionPipeline.from_pretrained("stable-diffusion-v1-5/stable-diffusion-v1-5")
+        self.pipeline = StableDiffusionPipeline.from_pretrained(model_name)
+
         self.unet = self.pipeline.unet.to(device)
         # converting unet to float16
         self.unet.half()
@@ -31,7 +34,11 @@ class StableDiffusionPrecond:
         self.beta_e = self.pipeline.scheduler.config.beta_end * self.M
         self.beta_d = self.beta_e**0.5 - self.beta_s**0.5
 
-        # setup text prompt embeddings
+        self.all_sigma = self.sigma(torch.arange(self.M)).to(self.device)
+        self.sigma_min = self.sigma_inv(0).item()
+        self.sigma_max = self.sigma_inv(self.M).item()
+
+    def set_prompt(self, text_prompt):
         prompt = [text_prompt]
         text_input = self.tokenizer(
             prompt, padding="max_length", max_length=self.tokenizer.model_max_length, truncation=True, return_tensors="pt")
@@ -90,7 +97,9 @@ class Denoiser_EDM_Latent():
     def __init__(
         self,
         device,
-        text_prompt,
+        model_name,
+        image_size,
+        text_prompt=None,
         num_steps=18,
         sigma_min=None,
         sigma_max=None,
@@ -114,7 +123,11 @@ class Denoiser_EDM_Latent():
         A latent diffusion sampler using the preconditioned model. This can
         also perform image generation starting from partially denoised images.
         """
-        self.net = StableDiffusionPrecond(device, text_prompt)
+        self.net = StableDiffusionPrecond(device, model_name)
+        if text_prompt is not None:
+            self.net.set_prompt(text_prompt)
+        self.image_size = image_size
+
         self.device = device
         self.num_steps = num_steps
         self.sigma_min = sigma_min
@@ -231,6 +244,8 @@ class Denoiser_EDM_Latent():
 
     # encode image to latent space, never use torch grad
     def encode_image(self, img):
+        assert img.shape == torch.Size([1, 3, self.image_size, self.image_size]), \
+            f"image size is {img.shape} but expected to be 1x3x{self.image_size}x{self.image_size}"
         with torch.no_grad():
             encoded = self.net.vae.encode(img).latent_dist.sample() * 0.18215
             return encoded
@@ -259,7 +274,7 @@ class Denoiser_EDM_Latent():
 
         # uncomment this and set eta to inf to automatically run from pure noise every time
         # x_next = torch.randn(1, 4, 256//8, 256//8, device=self.device) * \
-            # self.s(self.t_steps[i_start]) * self.sigma(self.t_steps[i_start])
+        # self.s(self.t_steps[i_start]) * self.sigma(self.t_steps[i_start])
 
         # 0, ..., N-1
         for i, (t_cur, t_next) in enumerate(zip(self.t_steps[:-1], self.t_steps[1:])):
@@ -291,6 +306,9 @@ class Denoiser_EDM_Latent():
 
         return x_next
 
+    def set_prompt(self, text_prompt):
+        self.net.set_prompt(text_prompt)
+
     # save image which is already scaled from -1 to 1
     def save_image(self, img, path):
         tv_save_image((img / 2 + 0.5).clamp(0, 1), path)
@@ -298,20 +316,84 @@ class Denoiser_EDM_Latent():
     # read image and scale from -1 to 1
     def read_image(self, path):
         img = torch.tensor(tv_read_image(path) /
-                         255.0, device=self.device)[None, :3, :, :]
+                           255.0, device=self.device)[None, :3, :, :]
+        img = tv_resize(img, (self.image_size, self.image_size))
         return img*2-1
 
+
 if __name__ == "__main__":
-    device = torch.device("cuda")
-    model = Denoiser_EDM_Latent(device, "boy with a tree behind him", num_steps=100)
+    device = torch.device("cuda:1")
 
-    x_clean = model.read_image("images/00014.png")
-    z_clean = model.encode_image(x_clean)
+    models = [
+        ["lambdalabs/miniSD-diffusers", 256],
+        ["sd-legacy/stable-diffusion-v1-5", 512],
+        ["stabilityai/stable-diffusion-2-1-base", 512],
+    ]
 
-    sigma = 1
-    z_noisy = z_clean + sigma * torch.randn_like(z_clean)
-    model.save_image(model.decode_image(z_noisy), "noised.png")
-    z_denoised = model(z_noisy, sigma)
-    x_denoised = model.decode_image(z_denoised)
+    test_cases = [
+        ["test_image_0", "a range of forest-covered mountains",
+            "a mountian of green jello"],
+        ["test_image_1", "a buddhist statue", "a teddy bear"],
+        ["test_image_2", "a black train locomotive", "a black mechanical keyboard"],
+        ["test_image_3", "a one-story house in the suburbs",
+         "a photo of mount everest"],
+        ["test_image_4", "a close-up of a canadian lynx with green leaves in the background",
+         "a realistic depiction of Garfield the cat"],
+        ["test_image_5", "a metal bridge above a highway",
+         "the top of a rollercoaster"],
+        ["test_image_6", "a waterfall surrounded by forest",
+         "a stack of chocolate truffles"],
+        ["00003", "a close-up of a young asian girl", "a boy with blue eyes"],
+        ["00014", "a close-up of a small child, with another child's hand on his right shoulder",
+         "a child in a desert"],
+        ["00015", "a man with a lock of blue hair",
+         "two cats playing with each other"],
+    ]
 
-    model.save_image(x_denoised, "denoised.png")
+    for [model_name, size] in models:
+        model = Denoiser_EDM_Latent(
+            device, model_name=model_name, image_size=size, num_steps=100)
+
+        prefix = model_name.split("/")[-1]
+
+        for [file, prompt1, prompt2] in test_cases:
+            x_clean = model.read_image(f"images/{file}.png")
+            z_clean = model.encode_image(x_clean)
+
+            # matching prompt
+            model.set_prompt(prompt1)
+
+            noisy_imgs = []
+            denoised_imgs = []
+
+            for sigma in np.linspace(0.25, 3, 8) ** 1.5:
+                z_noisy = z_clean + sigma * torch.randn_like(z_clean)
+
+                noisy = model.decode_image(z_noisy)
+                z_denoised = model(z_noisy, sigma)
+                x_denoised = model.decode_image(z_denoised)
+
+                noisy_imgs.append(noisy.squeeze().detach().cpu())
+                denoised_imgs.append(x_denoised.squeeze().detach().cpu())
+
+            figure = tv_make_grid(noisy_imgs + denoised_imgs, len(noisy_imgs))
+            model.save_image(figure, f"out/{file}-{prefix}-prompt-match.png")
+
+            # non-matching prompt
+            model.set_prompt(prompt2)
+
+            noisy_imgs = []
+            denoised_imgs = []
+
+            for sigma in np.linspace(0.25, 3, 8) ** 1.5:
+                z_noisy = z_clean + sigma * torch.randn_like(z_clean)
+
+                noisy = model.decode_image(z_noisy)
+                z_denoised = model(z_noisy, sigma)
+                x_denoised = model.decode_image(z_denoised)
+
+                noisy_imgs.append(noisy.squeeze().detach().cpu())
+                denoised_imgs.append(x_denoised.squeeze().detach().cpu())
+
+            figure = tv_make_grid(noisy_imgs + denoised_imgs, len(noisy_imgs))
+            model.save_image(figure, f"out/{file}-{prefix}-prompt-differ.png")

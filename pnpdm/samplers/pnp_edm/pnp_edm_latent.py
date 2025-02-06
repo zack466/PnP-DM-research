@@ -19,25 +19,43 @@ class PnPEDMLatent:
         self.operator = operator
         self.noiser = noiser
         self.device = device
-        prompt = config.text_prompt
+
         if config.mode == 'vp':
-            self.edm = Denoiser_EDM_Latent(device, prompt, **config.common_kwargs, **config.vp_kwargs, mode='pfode')
+            mode_kwargs = config.vp_kwargs
+            mode = "pfode"
         elif config.mode == 've':
-            self.edm = Denoiser_EDM_Latent(device, prompt, **config.common_kwargs, **config.ve_kwargs, mode='pfode')
+            mode_kwargs = config.ve_kwargs
+            mode='pfode'
         elif config.mode == 'iddpm':
-            self.edm = Denoiser_EDM_Latent(device, prompt, **config.common_kwargs, **config.iddpm_kwargs, mode='pfode')
+            mode_kwargs = config.iddpm_kwargs
+            mode='pfode'
         elif config.mode == 'edm':
-            self.edm = Denoiser_EDM_Latent(device, prompt, **config.common_kwargs, **config.edm_kwargs, mode='pfode')
+            mode_kwargs = config.edm_kwargs
+            mode='pfode'
         elif config.mode == 'vp_sde':
-            self.edm = Denoiser_EDM_Latent(device, prompt, **config.common_kwargs, **config.vp_kwargs, mode='sde')
+            mode_kwargs = config.vp_kwargs
+            mode='sde'
         elif config.mode == 've_sde':
-            self.edm = Denoiser_EDM_Latent(device, prompt, **config.common_kwargs, **config.ve_kwargs, mode='sde')
+            mode_kwargs = config.ve_kwargs
+            mode='sde'
         elif config.mode == 'iddpm_sde':
-            self.edm = Denoiser_EDM_Latent(device, prompt, **config.common_kwargs, **config.iddpm_kwargs, mode='sde')
+            mode_kwargs = config.iddpm_kwargs
+            mode='sde'
         elif config.mode == 'edm_sde':
-            self.edm = Denoiser_EDM_Latent(device, prompt, **config.common_kwargs, **config.edm_kwargs, mode='sde')
+            mode_kwargs = config.edm_kwargs
+            mode='sde'
         else:
             raise NotImplementedError(f"Mode {self.config.mode} is not implemented (must be latent_sde for pnp_edm_latent)")
+
+        args = [self.device, "sd-legacy/stable-diffusion-v1-5", 512]
+        kwargs = {
+            "text_prompt": config.text_prompt,
+            "mode" : mode,
+            **config.common_kwargs,
+            **mode_kwargs,
+        }
+
+        self.edm = Denoiser_EDM_Latent(*args, **kwargs)
 
     @property
     def display_name(self):
@@ -84,6 +102,7 @@ class PnPEDMLatent:
 
             if i % 10 == 0:
                 print(f"iteration {i} of likelihood")
+                print(f"eta is {eta}")
                 print(f"mag of v is {v.norm()}")
                 print(f"mag of x is {x.norm()}")
                 self.edm.save_image(self.edm.decode_image(x), f"likelihood_{i}.png")

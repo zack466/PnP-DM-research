@@ -44,7 +44,7 @@ class FFHQDataset(VisionDataset):
     def __init__(self, root: str, head: int = None, grayscale: bool = False, transform: Optional[Callable] = None):
         super().__init__(root, transform=transform)
         self.grayscale = grayscale
-        self.fpaths = sorted(glob(root + '/**/*.png', recursive=True))
+        self.fpaths = sorted(glob('./images/working/*.png', recursive=True))
         if head is not None:
             self.fpaths = self.fpaths[:head]
         assert len(self.fpaths) > 0, "File list is empty. Check the root."

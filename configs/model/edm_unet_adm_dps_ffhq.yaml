@@ -16,7 +16,7 @@ dropout: 0.0
 resblock_updown: True
 use_fp16: False
 use_new_attention_order: False
-model_path: path/to/ffhq_10m.pt
+model_path: ./models/ffhq_10m.pt
 
 diffusion:
   img_resolution: 256

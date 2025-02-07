@@ -4,6 +4,7 @@ from tqdm import tqdm
 import matplotlib.pyplot as plt
 from tqdm import tqdm
 from collections import defaultdict
+from torchvision.utils import make_grid as tv_make_grid
 
 from .denoiser_latent_edm import Denoiser_EDM_Latent
 
@@ -50,7 +51,7 @@ class PnPEDMLatent:
         args = [self.device, "sd-legacy/stable-diffusion-v1-5", 512]
         kwargs = {
             "text_prompt": config.text_prompt,
-            "mode" : mode,
+            "mode": mode,
             **config.common_kwargs,
             **mode_kwargs,
         }
@@ -92,7 +93,12 @@ class PnPEDMLatent:
         v = torch.randn_like(x_initial) * vel_scale
         v.requires_grad = False
 
+        images = []
+
         for i in range(num_iters):
+            # if i % 5 == 0:
+            #     images.append(self.edm.decode_image(x).squeeze().detach().cpu())
+
             for _ in range(K):
                 x += delta/2 * v
                 v += - delta * self.force(x, x_initial, y, sigma, rho)
@@ -100,13 +106,15 @@ class PnPEDMLatent:
 
             v = eta*v + np.sqrt(1 - eta**2) * torch.randn_like(v)
 
-            if i % 10 == 0:
-                print(f"iteration {i} of likelihood")
-                print(f"eta is {eta}")
-                print(f"mag of v is {v.norm()}")
-                print(f"mag of x is {x.norm()}")
-                self.edm.save_image(self.edm.decode_image(x), f"likelihood_{i}.png")
+            # if (i+1) % 5 == 0:
+            #     print(f"iteration {i} of likelihood")
+            #     print(f"eta is {eta}")
+            #     print(f"mag of v is {v.norm()}")
+            #     print(f"mag of x is {x.norm()}")
 
+        # NAME = f"delta-{delta:.2f}-gamma-{gamma}-vel-{vel_scale}-iters-{num_iters}"
+        # figure = tv_make_grid(images, len(images))
+        # self.edm.save_image(figure, f"likelihood_out/{NAME}-rho-{rho:.2f}.png")
 
         return x + rho * torch.randn_like(x)
 

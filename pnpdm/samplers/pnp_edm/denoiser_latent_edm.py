@@ -261,7 +261,11 @@ class Denoiser_EDM_Latent():
         i_start = torch.min(torch.nonzero(self.sigma(self.t_steps) < eta))
 
         # Get the next time step (one step larger sigma)
-        next_t = self.t_steps[i_start - 1] if i_start > 0 else self.t_steps[0]
+        if i_start > 0:
+            next_t = self.t_steps[i_start - 1]
+            i_start -= 1
+        else:
+            next_t = self.t_steps[0]
         
         next_sigma = self.sigma(next_t)
         target_sigma = eta

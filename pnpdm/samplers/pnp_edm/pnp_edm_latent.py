@@ -74,10 +74,10 @@ class PnPEDMLatent:
     # we need to use this regardless of the operator because the decoder
     # is part of the forward model in our formulation
     def proximal_generator(self, x_initial, y, sigma, rho):
-        num_iters = 20
-        delta = 0.05
-        gamma = 20
-        vel_scale = 3
+        gamma=5
+        num_iters=50
+        vel_scale=3
+        delta=0.01
 
         # for underdamped Langevin, we have
         # K = 1, 1 - eta = gamma*delta + o(delta)
@@ -99,13 +99,6 @@ class PnPEDMLatent:
                 x += delta/2 * v
 
             v = eta*v + np.sqrt(1 - eta**2) * torch.randn_like(v)
-
-            if i % 10 == 0:
-                print(f"iteration {i} of likelihood")
-                print(f"eta is {eta}")
-                print(f"mag of v is {v.norm()}")
-                print(f"mag of x is {x.norm()}")
-                self.edm.save_image(self.edm.decode_image(x), f"likelihood_{i}.png")
 
 
         return x + rho * torch.randn_like(x)

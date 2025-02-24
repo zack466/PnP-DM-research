@@ -75,10 +75,10 @@ class PnPEDMLatent:
     # we need to use this regardless of the operator because the decoder
     # is part of the forward model in our formulation
     def proximal_generator(self, x_initial, y, sigma, rho):
-        num_iters = 20
-        delta = 0.05
-        gamma = 20
-        vel_scale = 3
+        gamma=5
+        num_iters=50
+        vel_scale=3
+        delta=0.01
 
         # for underdamped Langevin, we have
         # K = 1, 1 - eta = gamma*delta + o(delta)
@@ -112,6 +112,8 @@ class PnPEDMLatent:
             #     print(f"mag of v is {v.norm()}")
             #     print(f"mag of x is {x.norm()}")
 
+
+        # visualizing likelihood steps
         # NAME = f"delta-{delta:.2f}-gamma-{gamma}-vel-{vel_scale}-iters-{num_iters}"
         # figure = tv_make_grid(images, len(images))
         # self.edm.save_image(figure, f"likelihood_out/{NAME}-rho-{rho:.2f}.png")

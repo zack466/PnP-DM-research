@@ -8,14 +8,15 @@ class Inpainting(LinearOperator):
         self.device = device
 
         # box mask
-        self.mask = torch.ones(1, channels, img_dim, img_dim, device=device)
-        self.mask[:, :, 3*img_dim//8 : 5*img_dim//8, 3*img_dim//8 : 5*img_dim//8] = 0
+        # self.mask = torch.ones(1, channels, img_dim, img_dim, device=device)
+        # self.mask[:, :, 3*img_dim//8 : 5*img_dim//8, 3*img_dim//8 : 5*img_dim//8] = 0
 
         # random mask
-        # p = 0.9
-        # self.mask = torch.rand(1, channels, img_dim, img_dim, device=device)
-        # self.mask[self.mask <= p] = 0
-        # self.mask[self.mask > p] = 1
+        p = 0.99
+        self.mask = torch.rand(1, 1, img_dim, img_dim, device=device).repeat(1, 3, 1, 1)
+        self.mask[self.mask <= p] = 0
+        self.mask[self.mask > p] = 1
+        self.mask = self.mask
 
         self.mask_inds = torch.where(self.mask==1)
 

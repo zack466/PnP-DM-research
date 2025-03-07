@@ -4,8 +4,36 @@ from tqdm import tqdm
 import matplotlib.pyplot as plt
 from tqdm import tqdm
 from collections import defaultdict
+from torchvision.utils import save_image
+from PIL import Image
 
-from .denoiser_latent_edm import Denoiser_EDM_Latent
+from .denoiser_latent_edm import StableDiffusionModel
+
+def norm_image_01(x):
+    return (x * 0.5 + 0.5).clip(0, 1)
+
+
+def visualize_pil(target, figsize=None):
+    pil_image = Image.open(target)
+    if figsize is None:
+        plt.figure(figsize=(24, 24))
+    else:
+        plt.figure(figsize=figsize)
+    plt.imshow(pil_image)
+    plt.axis('off')  # Turn off axis numbers and ticks
+    plt.show()
+
+
+def visualize_grid(images, target='image.png', nrow=10, figsize=None, normalize=True):
+    # Save images.
+    save_grid(images, target, nrow=nrow, normalize=normalize)
+    visualize_pil(target, figsize=figsize)
+
+def save_grid(images, target='image.png', nrow=10, normalize=True):
+    # Save images.
+    if normalize:
+        images = norm_image_01(images)
+    save_image(images, target, nrow=nrow)
 
 class PnPEDMLatent:
     """
@@ -55,70 +83,78 @@ class PnPEDMLatent:
             **mode_kwargs,
         }
 
-        self.edm = Denoiser_EDM_Latent(*args, **kwargs)
+        # self.edm = Denoiser_EDM_Latent(*args, **kwargs)
+        self.edm = StableDiffusionModel(device=self.device, prompt=config.text_prompt)
 
     @property
     def display_name(self):
         return f'pnp-edm-latent-{self.config.mode}-rho0={self.config.rho}-rhomin={self.config.rho_min}'
 
-    # - grad U
-    def force(self, x_cur, x_initial, y, sigma, rho):
-        # forward operator is A(D(z))
-        x_cur2 = x_cur.clone()
-        x_cur2.requires_grad = True
-        data_fit = (self.operator.forward(self.edm.decode_image(x_cur2)) - y).norm()**2 / (2*sigma**2)
-        grad = torch.autograd.grad(outputs=data_fit, inputs=x_cur2)[0]
-        return (grad + (x_cur - x_initial)/rho**2)
-
-    # the likelihood step
-    # we need to use this regardless of the operator because the decoder
-    # is part of the forward model in our formulation
-    def proximal_generator(self, x_initial, y, sigma, rho):
-        gamma=5
-        num_iters=50
-        vel_scale=3
-        delta=0.01
-
-        # for underdamped Langevin, we have
-        # K = 1, 1 - eta = gamma*delta + o(delta)
-        K = 1
-        eta = 1 - gamma*delta
-
-        # initialize position
-        x = x_initial.clone()
-        x.requires_grad = False
-
-        # initialize velocity
-        v = torch.randn_like(x_initial) * vel_scale
-        v.requires_grad = False
-
-        for i in range(num_iters):
-            for _ in range(K):
-                x += delta/2 * v
-                v += - delta * self.force(x, x_initial, y, sigma, rho)
-                x += delta/2 * v
-
-            v = eta*v + np.sqrt(1 - eta**2) * torch.randn_like(v)
-
-
-        return x + rho * torch.randn_like(x)
+    # # - grad U
+    # def force(self, x_cur, x_initial, y, sigma, rho):
+    #     # forward operator is A(D(z))
+    #     x_cur2 = x_cur.detach().clone()
+    #     x_cur2.requires_grad = True
+    #
+    #     val = self.edm.decode_image(x_cur2).to(torch.float32)
+    #     val = self.operator.forward(val).half()
+    #     val = val - y
+    #     data_fit = val.norm()**2 / (2*sigma**2)
+    #
+    #     grad = torch.autograd.grad(outputs=data_fit, inputs=x_cur2)[0]
+    #     return (grad + (x_cur - x_initial)/rho**2)
+    #
+    # # the likelihood step
+    # # we need to use this regardless of the operator because the decoder
+    # # is part of the forward model in our formulation
+    # def proximal_generator(self, x_initial, y, sigma, rho):
+    #     gamma=5
+    #     num_iters=50
+    #     vel_scale=3
+    #     delta=0.01
+    #
+    #     # for underdamped Langevin, we have
+    #     # K = 1, 1 - eta = gamma*delta + o(delta)
+    #     K = 1
+    #     eta = 1 - gamma*delta
+    #
+    #     # initialize position
+    #     x = x_initial.detach().clone()
+    #     x.requires_grad = False
+    #
+    #     # initialize velocity
+    #     v = torch.randn_like(x_initial) * vel_scale
+    #     v.requires_grad = False
+    #
+    #     for i in range(num_iters):
+    #         for _ in range(K):
+    #             x += delta/2 * v
+    #             v += - delta * self.force(x, x_initial, y, sigma, rho)
+    #             x += delta/2 * v
+    #
+    #         v = eta*v + np.sqrt(1 - eta**2) * torch.randn_like(v)
+    #
+    #
+    #     return x
 
     # Langevin Sampling
-    # def proximal_generator(self, x, y, sigma, rho):
-    #     gamma = self.config.gamma
-    #     num_iters = self.config.proximal_num_iters
-    #     z = x
-    #     z.requires_grad = True
-    #     for _ in range(num_iters):
-    #         # forward operator is A(D(z))
-    #         data_fit = (self.operator.forward(self.edm.decode_image(z)) - y).norm()**2 / (2*sigma**2)
-    #         grad = torch.autograd.grad(outputs=data_fit, inputs=z)[0]
-    #         z = z - gamma * grad - (gamma/rho**2) * (z - x) #+ np.sqrt(2*gamma) * torch.randn_like(x)
-    #     return z.type(torch.float16) + rho * torch.randn_like(x)
+    def proximal_generator(self, x, y, sigma, rho):
+        gamma = self.config.gamma
+        num_iters = self.config.proximal_num_iters
+        z = x
+        z.requires_grad = True
+        for _ in range(num_iters):
+            # forward operator is A(D(z))
+            data_fit = (self.operator.forward(self.edm.decode_image(z)) - y).norm()**2 / (2*sigma**2)
+            grad = torch.autograd.grad(outputs=data_fit, inputs=z)[0]
+            z = z - gamma * grad - (gamma/rho**2) * (z - x) + np.sqrt(2*gamma) * torch.randn_like(x)
+        return z #+ rho * torch.randn_like(x)
 
 
     def __call__(self, gt, y_n, record=False, fname=None, save_root=None, inv_transform=None, metrics={}):
         assert inv_transform is not None, "inv_transform cannot be None"
+        gt = gt.half()
+        y_n = y_n.half()
 
         log = defaultdict(list)
         cmap = 'gray' if gt.shape[1] == 1 else None
@@ -159,17 +195,14 @@ class PnPEDMLatent:
 
             # likelihood step
             z_latent = self.proximal_generator(x_latent, y_n, self.noiser.sigma, rho_iter)
+            z0 = self.edm.decode_image(z_latent)
+
+            z_latent = z_latent + torch.randn_like(z_latent)*rho_iter
             z = self.edm.decode_image(z_latent)
         
             # prior step
-            #convert to float16
-            z_latent = z_latent.to(torch.float16)
-            x_latent = self.edm(z_latent, rho_iter)
-            #convert back to float32
-            x_latent = x_latent.to(torch.float32)
+            x_latent = self.edm.sample(z_latent, starting_sigma=rho_iter)
             x = self.edm.decode_image(x_latent)
-            
-
 
             if i in iters_count_as_sample:
                 samples.append(x.detach().cpu())
@@ -185,8 +218,7 @@ class PnPEDMLatent:
                 xs_save = torch.cat((xs_save, x_save.detach().cpu()), dim=-1)
                 zs_save = torch.cat((zs_save, z_save.detach().cpu()), dim=-1)
 
-            self.edm.save_image(x, "current_x.png")
-            self.edm.save_image(z, "current_z.png")
+            save_grid(torch.cat([x, z0, z]), "current_steps.png")
             # plt.imsave(os.path.join(save_root, 'progress', fname+f"x-{i}.png"), x_save.permute(0, 2, 3, 1).squeeze().cpu().numpy(), cmap=cmap)
             # plt.imsave(os.path.join(save_root, 'progress', fname+f"z-{i}.png"), z_save.permute(0, 2, 3, 1).squeeze().cpu().numpy(), cmap=cmap)
             

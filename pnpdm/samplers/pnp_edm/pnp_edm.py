@@ -4,7 +4,6 @@ import matplotlib.pyplot as plt
 from tqdm import tqdm
 from collections import defaultdict
 from .denoiser_edm import Denoiser_EDM
-from .denoiser_latent_edm import Denoiser_EDM_Latent
 
 class PnPEDM:
     def __init__(self, config, model, operator, noiser, device):

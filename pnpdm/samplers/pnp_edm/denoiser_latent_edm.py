@@ -1103,7 +1103,6 @@ class StableDiffusionModel:
 
     @torch.no_grad()
     def sample(self, z_start, starting_sigma=0, text_prompt=None):
-        print("sigma", starting_sigma)
         starting_timestep = self.num_steps
         while self.get_sigma(starting_timestep) < starting_sigma:
             starting_timestep -= 1
@@ -1112,7 +1111,6 @@ class StableDiffusionModel:
 
         # adjust for sigma difference
         z_start = z_start + torch.randn_like(z_start) * torch.sqrt(self.get_sigma(starting_timestep)**2 - starting_sigma**2)
-        print("timestep", starting_timestep)
 
         scale = self.get_scale(starting_timestep)
         z_start_input = z_start * scale

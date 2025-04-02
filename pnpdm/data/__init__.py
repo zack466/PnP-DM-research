@@ -1,4 +1,6 @@
+from pathlib import Path
 import torch
+import json
 import numpy as np
 from glob import glob
 from PIL import Image
@@ -61,6 +63,48 @@ class FFHQDataset(VisionDataset):
 
     def __getitem__(self, index: int):
         fpath = self.fpaths[index]
+        if self.grayscale:
+            img = Image.open(fpath).convert("L")
+            img = torch.from_numpy(np.array(img).astype(np.float32))[None] / 255.0
+        else:
+            img = Image.open(fpath).convert('RGB')
+            img = torch.from_numpy(np.array(img).astype(np.float32)).permute(2, 0, 1) / 255.0
+        
+        if self.transform is not None:
+            img = self.transform(img)
+        
+        return img
+
+
+@register_dataset(name='images_with_prompts')
+class ImagesWithPrompts(VisionDataset):
+    def __init__(self, root: str, prompts_file: str, head: int = None, grayscale: bool = False, transform: Optional[Callable] = None):
+        super().__init__(root, transform=transform)
+        self.grayscale = grayscale
+
+        self.root = Path(root)
+
+        with open(prompts_file, "r") as f:
+            self.prompts = json.load(f)
+        assert len(self.prompts) > 0, "no prompts found"
+
+    @property
+    def display_name(self):
+        if self.grayscale:
+            return 'images_with_prompts-gs'
+        else:
+            return 'images_with_prompts'
+
+    def get_prompt(self, index: int):
+        return self.prompts[index]["prompt"]
+
+    def __len__(self):
+        return len(self.prompts)
+
+    def __getitem__(self, index: int):
+        path = self.prompts[index]["image"]
+        fpath = self.root / path
+
         if self.grayscale:
             img = Image.open(fpath).convert("L")
             img = torch.from_numpy(np.array(img).astype(np.float32))[None] / 255.0

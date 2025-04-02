@@ -1,0 +1,10 @@
+[
+    { "image": "cat_512.png", "prompt": "A high quality image of a cat." },
+    { "image": "girl_512.png", "prompt": "A high quality image of a girl." },
+    { "image": "parrot_512.png", "prompt": "A high quality image of a parrot." },
+    { "image": "street_512.png", "prompt": "A high quality image of a busy London street." },
+    { "image": "cat_512.png", "prompt": "A high quality image of a dog." },
+    { "image": "girl_512.png", "prompt": "A high quality image of a dog." },
+    { "image": "parrot_512.png", "prompt": "A high quality image of a dog." },
+    { "image": "street_512.png", "prompt": "A high quality image of a dog." }
+]

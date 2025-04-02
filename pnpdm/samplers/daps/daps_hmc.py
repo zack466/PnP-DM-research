@@ -1,4 +1,5 @@
 import torch, os
+import logging
 import numpy as np
 from tqdm import tqdm
 import matplotlib.pyplot as plt
@@ -6,8 +7,6 @@ from tqdm import tqdm, trange
 from collections import defaultdict
 from torchvision.utils import save_image
 from PIL import Image
-
-from .denoiser_latent_edm import StableDiffusionModel
 
 def norm_image_01(x):
     return (x * 0.5 + 0.5).clip(0, 1)
@@ -35,7 +34,7 @@ def save_grid(images, target='image.png', nrow=10, normalize=True):
         images = norm_image_01(images)
     save_image(images, target, nrow=nrow)
 
-class PnPEDMLatent:
+class DapsHMC:
     """
     Run our latent version of PnP-DM. This is very similar to the original
     versions with modifications to the likelihood and prior steps which allow
@@ -48,15 +47,19 @@ class PnPEDMLatent:
         self.noiser = noiser
         self.device = device
 
-        # self.edm = Denoiser_EDM_Latent(*args, **kwargs)
-        self.edm = StableDiffusionModel(device=self.device, prompt=config.text_prompt)
+        self.model = model
+        # TODO: check that the model is of a certain type?
+        assert hasattr(self.model, "num_steps"), "this sampler requires the model to have a `num_steps` attribute"
+        assert hasattr(self.model, "decode_image"), "this sampler requires the model to have a `decode_image` function"
+        if not hasattr(self.model, "set_prompt"):
+            logging.warning("the model for this sampler has no `set_prompt` function")
 
     @property
     def display_name(self):
-        return f'pnp-edm-latent-{self.config.mode}-rho0={self.config.rho}-rhomin={self.config.rho_min}'
+        return f'daps-likelihood-{self.model.__class__.__name__}-prior'
 
     def loss(self, pred, observation):
-        decoded = self.edm.decode_image(pred).float()
+        decoded = self.model.decode_image(pred).float()
         return ((self.operator.forward(decoded) - observation) ** 2).flatten(1).sum(-1)
 
     def get_grad(self, pred, observation, return_loss=False):
@@ -81,7 +84,7 @@ class PnPEDMLatent:
         prior_score = (x0hat - xt).detach() / rho ** 2
 
         x = x0hat.clone().detach()
-        pbar = trange(num_steps)
+        pbar = trange(num_steps, disable=True)
         for _ in pbar:
             # Langevin step: compute/approximate the score function p(x_0 = x | x_t, y)
             data_fitting_grad, data_fitting_loss = self.get_grad(x, measurement, return_loss=True)
@@ -109,11 +112,11 @@ class PnPEDMLatent:
         cmap = 'gray' if gt.shape[1] == 1 else None
 
         # get starting latent vector
-        z_latent = self.edm.get_start(1)
+        z_latent = self.model.get_start(1)
 
         # get starting x
         x_latent = z_latent
-        x = self.edm.decode_image(x_latent)
+        x = self.model.decode_image(x_latent)
 
         # logging
         x_save = inv_transform(x)
@@ -143,8 +146,8 @@ class PnPEDMLatent:
         )[1:]
         assert self.config.num_iters-1 in iters_count_as_sample, "num_iters-1 should be included in iters_count_as_sample"
 
-        rho_values = [self.edm.get_sigma(i) for i in range(self.edm.num_steps)]
-        self.config.num_iters = len(rho_values)
+        rho_values = [self.model.get_sigma(i) for i in range(self.model.num_steps)]
+        assert self.config.num_iters == len(rho_values), f"DAPS iters ({self.config.num_iters}) must match model steps ({len(rho_values)})"
 
         sub_pbar = tqdm(range(self.config.num_iters))
         for i in sub_pbar:
@@ -153,17 +156,17 @@ class PnPEDMLatent:
             rho_iter = rho_values[i]
 
             # prior step (reverse diffusion)
-            x_latent = self.edm.sample(z_latent, starting_sigma=rho_iter)
-            x = self.edm.decode_image(x_latent)
+            x_latent = self.model.sample(z_latent, starting_sigma=rho_iter)
+            x = self.model.decode_image(x_latent)
 
             # likelihood step (langevin dynamics)
             z_latent = self.proximal_generator(z_latent, x_latent, y_n, self.noiser.sigma, rho_iter)
-            z0 = self.edm.decode_image(z_latent)
+            z0 = self.model.decode_image(z_latent)
 
             # add noise (forward diffusion)
             if i != len(rho_values)-1:
                 z_latent = z_latent + torch.randn_like(z_latent)*rho_values[i+1]
-            z = self.edm.decode_image(z_latent)
+            z = self.model.decode_image(z_latent)
         
             if i in iters_count_as_sample:
                 samples.append(x.detach().cpu())
@@ -179,7 +182,7 @@ class PnPEDMLatent:
                 xs_save = torch.cat((xs_save, x_save.detach().cpu()), dim=-1)
                 zs_save = torch.cat((zs_save, z_save.detach().cpu()), dim=-1)
 
-            # save_grid(torch.cat([x, z0, z]), f"pnpdm_step{i:03}.png")
+            save_grid(torch.cat([x, z0, z]), f"pnpdm_step{i:03}.png")
             
             if record:
                 log["x"].append(x_save.permute(0, 2, 3, 1).squeeze().cpu().numpy())

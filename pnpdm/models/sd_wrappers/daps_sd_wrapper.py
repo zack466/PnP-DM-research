@@ -1070,23 +1070,27 @@ class ModifiedStableDiffusionPipeline(
         return StableDiffusionPipelineOutput(images=image, nsfw_content_detected=has_nsfw_concept)
 
 
-class StableDiffusionModel:
-    def __init__(self, model_id = "sd-legacy/stable-diffusion-v1-5", resolution=512, target_resolution=512, num_steps=50, guidance_scale=7.5, prompt='a natural looking human face', device="cuda"):
+class DapsSDWrapper:
+    def __init__(self, model_id = "sd-legacy/stable-diffusion-v1-5", resolution=512, target_resolution=512, num_steps=50, guidance_scale=7.5, initial_prompt='a natural looking human face', device="cuda"):
         super().__init__()
         pipe = ModifiedStableDiffusionPipeline.from_pretrained(model_id, torch_dtype=torch.float16)
         pipe.scheduler = DPMSolverMultistepScheduler.from_config(pipe.scheduler.config)
         self.pipe = pipe.to(device)
         self.vae = self.pipe.vae
         self.guidance_scale = guidance_scale
-        self.prompt = prompt
+        self.prompt = initial_prompt
         self.device = device
         self.latent_scale = self.pipe.vae.config.scaling_factor
+        print("steps", num_steps)
         self.num_steps = num_steps
         self.dtype = torch.float16
         self.resolution = resolution
         self.scheduler = self.pipe.scheduler
         self.scheduler.set_timesteps(num_steps)
         self.target_resolution = target_resolution
+
+    def set_prompt(self, prompt):
+        self.prompt = prompt
 
     def set_num_steps(self, num_steps):
         self.num_steps = num_steps
@@ -1102,7 +1106,7 @@ class StableDiffusionModel:
         return x0
 
     @torch.no_grad()
-    def sample(self, z_start, starting_sigma=0, text_prompt=None):
+    def sample(self, z_start, starting_sigma=0):
         starting_timestep = self.num_steps
         while self.get_sigma(starting_timestep) < starting_sigma:
             starting_timestep -= 1
@@ -1115,9 +1119,7 @@ class StableDiffusionModel:
         scale = self.get_scale(starting_timestep)
         z_start_input = z_start * scale
         # print('scale', scale)
-        if text_prompt is None:
-            text_prompt = self.prompt
-        return self.pipe(z_start=z_start_input, starting_timestep=starting_timestep, prompt=text_prompt, num_inference_steps=self.num_steps, output_type='latent', guidance_scale=self.guidance_scale, verbose=False)['images']
+        return self.pipe(z_start=z_start_input, starting_timestep=starting_timestep, prompt=self.prompt, num_inference_steps=self.num_steps, output_type='latent', guidance_scale=self.guidance_scale, verbose=False)['images']
 
     def get_sigma(self, t):
         return self.scheduler.sigmas[t]
@@ -1146,26 +1148,3 @@ class StableDiffusionModel:
     def tweedie(self, z, sigma):
         raise NotImplementedError
 
-
-if __name__ == "__main__":
-    device = torch.device("cuda:1")
-
-    prompt = "Blue butterfly on white flower, green blurred background."
-
-
-    # pipeline = StableDiffusionPipeline.from_pretrained("sd-legacy/stable-diffusion-v1-5").to(device)
-    # img = pipeline(prompt)
-    # img[0][0].save("pipeline_output.png")
-    #
-    #
-    model = Denoiser_EDM_Latent(
-        device, model_name="sd-legacy/stable-diffusion-v1-5", image_size=512, num_steps=100, discretization="vp", scaling="vp")
-    model.set_prompt(prompt)
-
-    sigma = 10
-    noise = torch.randn((1, 4, 512//8, 512//8), device=model.device)*sigma
-    noise = noise.half()
-
-    z_denoised = model(noise, sigma)
-    x_denoised = model.decode_image(torch.tensor(z_denoised, dtype=torch.float32))
-    model.save_image(x_denoised, f"test_output.png")

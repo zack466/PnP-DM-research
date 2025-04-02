@@ -1,0 +1,4 @@
+name: daps_hmc
+num_iters: 100
+num_burn_in_iters: 40
+num_samples_per_run: 20

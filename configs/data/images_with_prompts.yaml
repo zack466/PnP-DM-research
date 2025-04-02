@@ -1,0 +1,3 @@
+name: images_with_prompts
+root: ./final_images_and_prompts
+prompts_file: ./final_images_and_prompts/prompts.json

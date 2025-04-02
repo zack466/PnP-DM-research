@@ -1,0 +1,4 @@
+name: daps_sd_wrapper
+
+model_id: "sd-legacy/stable-diffusion-v1-5"
+num_steps: 50

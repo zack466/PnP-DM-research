@@ -44,10 +44,13 @@ def posterior_sample(cfg):
     num_test_images = len(dataset)
     dataloader = get_dataloader(dataset, batch_size=1, num_workers=0, train=False)
 
+    if hasattr(dataset, "get_prompt"):
+        prompts = [dataset.get_prompt(i) for i in range(num_test_images)]
+    else:
+        prompts = ["" for i in range(num_test_images)]
+
     # load model
-    model = get_model(**model_config)
-    model = model.to(device)
-    model.eval()
+    model = get_model(**model_config, device=device)
 
     # load sampler
     sampler = get_sampler(sampler_config, model=model, operator=operator, noiser=noiser, device=device)
@@ -70,11 +73,17 @@ def posterior_sample(cfg):
         'ssim': SSIMMetric(spatial_dims=2),
         'lpips': LPIPS().to(device).eval(),
     }
-    for i, ref_img in enumerate(dataloader):
+    for i, (ref_img, prompt) in enumerate(zip(dataloader, prompts)):
         logger.info(f"Inference for image {i} on device {device_str}")
         file_idx = f"{i:05d}"
         ref_img = ref_img.to(device)
         cmap = 'gray' if ref_img.shape[1] == 1 else None
+
+        if hasattr(model, "set_prompt"):
+            model.set_prompt(prompt)
+            print("set prompt to ", prompt)
+        elif prompt != "":
+            logging.warning("nonempty text prompt but model has no `set_prompt` method")
 
         # regenerate kernel for motion blur
         if isinstance(operator, MotionBlurCircular):
@@ -134,6 +143,9 @@ def posterior_sample(cfg):
                 log["consistency_mean"].append(torch.norm(operator.forward(transform(mean)) - y_n).item())
                 plt.imsave(os.path.join(out_path, 'recon', file_idx+f'_run_{j}_mean.png'), log["means"][-1], cmap=cmap)
                 # plt.imsave(os.path.join(out_path, 'recon', file_idx+f'_run_{j}_std.png'), log["stds"][-1], cmap=cmap)
+
+        with open(os.path.join(out_path, "prompts.txt"), "a") as f:
+            f.write(f"{file_idx} -- \"{prompt}\"\n")
 
         np.save(os.path.join(out_path, 'recon', file_idx+'_log.npy'), log)
 

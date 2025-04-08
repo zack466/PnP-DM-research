@@ -8,6 +8,7 @@ from torchvision.utils import save_image as tv_save_image
 from torchvision.utils import make_grid as tv_make_grid
 from torchvision.io import read_image as tv_read_image
 from torchvision.transforms.functional import resize as tv_resize
+from .sd_wrapper_abc import SDWrapper
 
 import inspect
 from typing import Any, Callable, Dict, List, Optional, Union
@@ -1070,9 +1071,8 @@ class ModifiedStableDiffusionPipeline(
         return StableDiffusionPipelineOutput(images=image, nsfw_content_detected=has_nsfw_concept)
 
 
-class DapsSDWrapper:
+class DapsSDWrapper(SDWrapper):
     def __init__(self, model_id = "sd-legacy/stable-diffusion-v1-5", resolution=512, target_resolution=512, num_steps=50, guidance_scale=7.5, initial_prompt='a natural looking human face', device="cuda"):
-        super().__init__()
         pipe = ModifiedStableDiffusionPipeline.from_pretrained(model_id, torch_dtype=torch.float16)
         pipe.scheduler = DPMSolverMultistepScheduler.from_config(pipe.scheduler.config)
         self.pipe = pipe.to(device)
@@ -1121,20 +1121,20 @@ class DapsSDWrapper:
         # print('scale', scale)
         return self.pipe(z_start=z_start_input, starting_timestep=starting_timestep, prompt=self.prompt, num_inference_steps=self.num_steps, output_type='latent', guidance_scale=self.guidance_scale, verbose=False)['images']
 
-    def get_sigma(self, t):
-        return self.scheduler.sigmas[t]
+    def get_sigma(self, timestep):
+        return self.scheduler.sigmas[timestep]
 
     def get_scale(self, t):
         return 1 / (1 + self.get_sigma(t)**2).sqrt()
 
     @torch.no_grad()
-    def get_start(self, batch_size):
+    def get_start(self):
         # height = self.unet.config.sample_size * self.vae_scale_factor
         # width = self.unet.config.sample_size * self.vae_scale_factor
         height = width = self.resolution
         num_channels_latents = self.pipe.unet.config.in_channels
         latents = self.pipe.prepare_latents(
-            batch_size,
+            1, # batch size
             num_channels_latents,
             height,
             width,

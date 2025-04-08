@@ -1,4 +1,7 @@
-name: daps_hmc
+name: pnpdm_latent
 num_iters: 50
 num_burn_in_iters: 40
 num_samples_per_run: 20
+
+rho_initial: 10
+rho_final: 0.03

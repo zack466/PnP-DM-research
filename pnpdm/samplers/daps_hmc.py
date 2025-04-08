@@ -42,13 +42,11 @@ class DapsHMC:
     """
     def __init__(self, config, model, operator, noiser, device):
         self.config = config
-        self.model = model
         self.operator = operator
         self.noiser = noiser
         self.device = device
 
         self.model = model
-        # TODO: check that the model is of a certain type?
         assert hasattr(self.model, "num_steps"), "this sampler requires the model to have a `num_steps` attribute"
         assert hasattr(self.model, "decode_image"), "this sampler requires the model to have a `decode_image` function"
         if not hasattr(self.model, "set_prompt"):
@@ -112,7 +110,7 @@ class DapsHMC:
         cmap = 'gray' if gt.shape[1] == 1 else None
 
         # get starting latent vector
-        z_latent = self.model.get_start(1)
+        z_latent = self.model.get_start()
 
         # get starting x
         x_latent = z_latent
@@ -139,9 +137,9 @@ class DapsHMC:
 
         samples = []
         iters_count_as_sample = np.linspace(
-            self.config.num_burn_in_iters, 
-            self.config.num_iters-1, 
-            self.config.num_samples_per_run+1, 
+            self.config.num_burn_in_iters,
+            self.config.num_iters-1,
+            self.config.num_samples_per_run+1,
             dtype=int
         )[1:]
         assert self.config.num_iters-1 in iters_count_as_sample, "num_iters-1 should be included in iters_count_as_sample"
@@ -167,7 +165,7 @@ class DapsHMC:
             if i != len(rho_values)-1:
                 z_latent = z_latent + torch.randn_like(z_latent)*rho_values[i+1]
             z = self.model.decode_image(z_latent)
-        
+
             if i in iters_count_as_sample:
                 samples.append(x.detach().cpu())
 
@@ -183,7 +181,7 @@ class DapsHMC:
                 zs_save = torch.cat((zs_save, z_save.detach().cpu()), dim=-1)
 
             save_grid(torch.cat([x, z0, z]), f"pnpdm_step{i:03}.png")
-            
+
             if record:
                 log["x"].append(x_save.permute(0, 2, 3, 1).squeeze().cpu().numpy())
 

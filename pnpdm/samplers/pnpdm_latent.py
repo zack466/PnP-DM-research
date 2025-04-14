@@ -70,8 +70,8 @@ class PnPDMLatent:
         return -(grad + (x_cur - x_initial)/rho**2)
 
     def mcmc_sample(self, _, x0, measurement, sigma, rho):
-        lr = 2e-4
-        num_steps = 50
+        lr = 1e-4
+        num_steps = 30
         momentum = 0.45
 
         velocity = torch.randn_like(x0)

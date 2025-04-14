@@ -123,7 +123,7 @@ def posterior_sample(cfg):
                 inv_transform=inv_transform, 
                 metrics=metrics
             )
-            samples = inv_transform(samples)
+            samples = inv_transform(samples).float()
             sample = samples[[-1]] # take the last sample as the single sample for calculating metrics
             if len(samples) > 1:
                 mean, std = torch.mean(samples, dim=0, keepdim=True), torch.std(samples, dim=0, keepdim=True)

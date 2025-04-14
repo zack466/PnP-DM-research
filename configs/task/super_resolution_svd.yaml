@@ -1,8 +1,8 @@
 operator:
   name: super_resolution_svd
   channels: 3
-  img_dim: 256
-  ratio: 4
+  img_dim: 512
+  ratio: 8
 
 noise: 
   name: gaussian

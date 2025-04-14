@@ -53,7 +53,7 @@ class UnifiedLatent:
             logging.warning("the model for this sampler has no `set_prompt` function")
 
     def get_rho_schedule(self, num_iters):
-        if self.config.schedule == "daps_gaussian":
+        if self.config.schedule == "daps":
             # DAPS schedule matches the model steps
             assert self.model.num_steps == num_iters, "for DAPS, num iters should match model steps"
             rho_values = [self.model.get_sigma(i) for i in range(num_iters)]
@@ -72,13 +72,13 @@ class UnifiedLatent:
             raise NotImplementedError("Langevin sampling not yet implemented")
         elif self.config.method == "optimize":
             # DCDP returns the optimized result
-            raise NotImplementedError("DCDP sampling not yet implemented")
+            return self.dcdp_sample
         else:
             raise ValueError(f"Unknown likelihood sampler {self.config.method}")
 
     @property
     def display_name(self):
-        return f'{self.config.method}__{self.config.schedule}__{self.model.__class__.__name__}'
+        return f'{self.config.method}__{self.config.schedule}_schedule__{self.model.__class__.__name__}'
 
     def loss(self, pred, observation):
         decoded = self.model.decode_image(pred).float()
@@ -94,8 +94,8 @@ class UnifiedLatent:
         return pred_grad
 
     def hmc_sample(self, x0, measurement, sigma, rho):
-        lr = 1e-4
-        num_steps = 30
+        lr = 1e-5
+        num_steps = 10
         momentum = 0.45
 
         velocity = torch.randn_like(x0)
@@ -114,6 +114,20 @@ class UnifiedLatent:
             x = x + velocity * step_size
 
         return x
+
+    def dcdp_sample(self, x0, measurement, sigma, rho):
+        x = x0.clone().detach().requires_grad_(True)
+        optimizer = torch.optim.SGD([x], lr=1e-2, momentum=0.9)
+
+        for i in range(30):
+            loss = self.loss(x, measurement)
+
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+
+        return x.detach()
+    
 
     def __call__(self, gt, y_n, record=False, fname=None, save_root=None, inv_transform=None, metrics={}):
         assert inv_transform is not None, "inv_transform cannot be None"

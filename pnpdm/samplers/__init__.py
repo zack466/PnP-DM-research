@@ -1,3 +1,4 @@
+from .unified_latent_sampler import UnifiedLatent
 from .pnp_edm.pnp_edm import PnPEDM, PnPEDMBatch
 from .daps_hmc import DapsHMC
 from .pnp_edm.pnp_edm_bh import PnPEDMBH, PnPEDMBHBatch
@@ -19,5 +20,7 @@ def get_sampler(config, model, operator, noiser, device):
         return PnPDMLatent(config, model, operator, noiser, device)
     elif config.name == 'daps_hmc':
         return DapsHMC(config, model, operator, noiser, device)
+    elif config.name == 'unified_latent':
+        return UnifiedLatent(config, model, operator, noiser, device)
     else:
         raise NameError(f"Sampler {config.name} is not defined.")

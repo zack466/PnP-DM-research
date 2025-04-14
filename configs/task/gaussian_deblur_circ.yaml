@@ -3,7 +3,7 @@ operator:
   kernel_size: 61
   intensity: 3.0
   channels: 3
-  img_dim: 256
+  img_dim: 512
 
 noise: 
   name: gaussian

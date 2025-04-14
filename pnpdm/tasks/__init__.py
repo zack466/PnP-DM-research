@@ -195,3 +195,4 @@ from .super_resolution_svd import SuperResolution
 from .coded_diffraction_patterns import CodedDiffractionPatterns
 from .phase_retrieval import PhaseRetrieval
 from .fourier_subsampling import FourierSubsampling
+from .box_inpainting import BoxInpainting

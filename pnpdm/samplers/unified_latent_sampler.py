@@ -112,14 +112,14 @@ class UnifiedLatent:
         return pred_grad
 
     def hmc_sample(self, x0, measurement, sigma, rho):
-        lr = 1e-5
-        num_steps = 10
-        momentum = 0.45
+        lr = self.config.sample_learning_rate
+        sample_iters = self.config.sample_num_iters
+        momentum = self.config.sample_momentum
 
         velocity = torch.randn_like(x0)
 
         x = x0.clone().detach()
-        pbar = trange(num_steps, disable=True)
+        pbar = trange(sample_iters, disable=True)
         for _ in pbar:
             # Langevin step: compute/approximate the score function p(x_0 = x | x_t, y)
             data_fitting_grad = self.get_grad(x, measurement)
@@ -134,10 +134,14 @@ class UnifiedLatent:
         return x
 
     def dcdp_sample(self, x0, measurement, sigma, rho):
-        x = x0.clone().detach().requires_grad_(True)
-        optimizer = torch.optim.SGD([x], lr=1e-2, momentum=0.9)
+        lr = self.config.sample_learning_rate
+        sample_iters = self.config.sample_num_iters
+        momentum = self.config.sample_momentum
 
-        for i in range(30):
+        x = x0.clone().detach().requires_grad_(True)
+        optimizer = torch.optim.SGD([x], lr=lr, momentum=momentum)
+
+        for i in range(sample_iters):
             loss = self.loss(x, measurement)
 
             optimizer.zero_grad()

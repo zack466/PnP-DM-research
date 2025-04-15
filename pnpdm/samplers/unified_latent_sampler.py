@@ -57,10 +57,16 @@ class UnifiedLatent:
             # DAPS schedule matches the model steps
             assert self.model.num_steps == num_iters, "for timestep schedule, num iters should match model steps"
             rho_values = [self.model.get_sigma(i) for i in range(num_iters)]
+            print(rho_values)
             return rho_values
         elif self.config.schedule == "exponential":
             # Exponentially decrease rho
             raise ValueError("exponential schedule not yet implemented")
+        elif self.config.schedule == "linear":
+            first_val = self.model.get_sigma(0)
+            last_val = self.model.get_sigma(num_iters - 1)
+            rho_schedule = [first_val - (first_val - last_val) * (i / (num_iters - 1)) for i in range(num_iters)]
+            return rho_schedule   
         else:
             raise ValueError(f"Unknown rho schedule {self.config.schedule}")
 
@@ -228,3 +234,16 @@ class UnifiedLatent:
         np.save(os.path.join(save_root, 'progress', fname+"_log.npy"), log)
 
         return torch.concat(samples, dim=0).to(self.device)
+
+def linear_decay_rho_schedule(self, num_iters):
+    # Get all sigma values
+    rho_values = [self.model.get_sigma(i) for i in range(num_iters)]
+    
+    # Find min and max
+    min_rho = min(rho_values)
+    max_rho = max(rho_values)
+    
+    # Create linear decay from max to min
+    linear_schedule = [max_rho - (max_rho - min_rho) * (i / (num_iters - 1)) for i in range(num_iters)]
+    
+    return linear_schedule

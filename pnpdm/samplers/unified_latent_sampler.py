@@ -53,9 +53,9 @@ class UnifiedLatent:
             logging.warning("the model for this sampler has no `set_prompt` function")
 
     def get_rho_schedule(self, num_iters):
-        if self.config.schedule == "daps":
+        if self.config.schedule == "timestep":
             # DAPS schedule matches the model steps
-            assert self.model.num_steps == num_iters, "for DAPS, num iters should match model steps"
+            assert self.model.num_steps == num_iters, "for timestep schedule, num iters should match model steps"
             rho_values = [self.model.get_sigma(i) for i in range(num_iters)]
             return rho_values
         elif self.config.schedule == "exponential":
@@ -70,7 +70,7 @@ class UnifiedLatent:
             return self.hmc_sample
         elif self.config.method == "langevin":
             raise NotImplementedError("Langevin sampling not yet implemented")
-        elif self.config.method == "optimize":
+        elif self.config.method == "dcdp":
             # DCDP returns the optimized result
             return self.dcdp_sample
         else:

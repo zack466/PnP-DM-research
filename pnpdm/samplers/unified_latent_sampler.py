@@ -53,18 +53,32 @@ class UnifiedLatent:
             logging.warning("the model for this sampler has no `set_prompt` function")
 
     def get_rho_schedule(self, num_iters):
+        max_allowed = self.model.get_sigma(0)
+        min_allowed = self.model.get_sigma(self.model.num_steps - 1)
+
+        if self.config.rho_min is None:
+            rho_min = min_allowed
+        else:
+            rho_min = max(min_allowed, self.config.rho_min)
+
+        if self.config.rho_max is None:
+            rho_max = max_allowed
+        else:
+            rho_max = min(max_allowed, self.config.rho_max)
+
         if self.config.schedule == "timestep":
             # DAPS schedule matches the model steps
             assert self.model.num_steps == num_iters, "for timestep schedule, num iters should match model steps"
-            rho_values = [self.model.get_sigma(i) for i in range(num_iters)]
-            print(rho_values)
+            rho_values = [self.model.get_sigma(i) for i in range(num_iters) if rho_min <= self.model.get_sigma(i) <= rho_max]
+            if len(rho_values) < num_iters:
+                logging.warning(f"ignoring some noise levels to stay in sigma range {rho_min:.2f}-{rho_max:.2f}")
             return rho_values
         elif self.config.schedule == "exponential":
             # Exponentially decrease rho
             raise ValueError("exponential schedule not yet implemented")
         elif self.config.schedule == "linear":
-            first_val = self.model.get_sigma(0)
-            last_val = self.model.get_sigma(num_iters - 1)
+            first_val = rho_max
+            last_val = rho_min
             rho_schedule = [first_val - (first_val - last_val) * (i / (num_iters - 1)) for i in range(num_iters)]
             return rho_schedule   
         else:
@@ -76,8 +90,8 @@ class UnifiedLatent:
             return self.hmc_sample
         elif self.config.method == "langevin":
             raise NotImplementedError("Langevin sampling not yet implemented")
-        elif self.config.method == "dcdp":
-            # DCDP returns the optimized result
+        elif self.config.method == "optimize":
+            # DCDP samples using a pytorch optimizer
             return self.dcdp_sample
         else:
             raise ValueError(f"Unknown likelihood sampler {self.config.method}")

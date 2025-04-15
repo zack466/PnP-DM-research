@@ -2,7 +2,11 @@ operator:
   name: box_inpainting
   channels: 3
   img_dim: 512
+  xmin: 128
+  ymin: 128
+  xmax: 384
+  ymax: 384
 
 noise:
   name: gaussian
-  sigma: 0.15
+  sigma: 0.01

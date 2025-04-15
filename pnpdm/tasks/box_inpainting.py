@@ -5,12 +5,12 @@ from . import register_operator, LinearOperator
 
 @register_operator(name='box_inpainting')
 class BoxInpainting(LinearOperator):
-    def __init__(self, channels, img_dim, device) -> None:
+    def __init__(self, channels, img_dim, device, xmin, ymin, xmax, ymax) -> None:
         assert channels in [1, 3], 'The number of channels should be either 1 or 3!'
         self.device = device
 
         mask = torch.ones((img_dim, img_dim))
-        mask[200:400, 200:400] = 0
+        mask[xmin:xmax, ymin:ymax] = 0
         self.mask = torch.stack([mask, mask, mask]).to(device)
 
 

@@ -1,0 +1,15 @@
+name: unified_latent
+
+num_iters: 50
+
+schedule: linear
+rho_min: null
+rho_max: null
+
+method: optimize
+sample_num_iters: 30
+sample_learning_rate: 1e-2
+sample_momentum: 0.9
+
+num_burn_in_iters: 40
+num_samples_per_run: 20

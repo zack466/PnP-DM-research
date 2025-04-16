@@ -208,7 +208,7 @@ class UnifiedLatent:
             z0 = self.model.decode_image(z_latent)
 
             # add noise (forward diffusion)
-            if i != len(rho_values)-1:
+            if i != len(rho_values)-1 and not self.config.skip_noising:
                 z_latent = z_latent + torch.randn_like(z_latent)*rho_values[i+1]
             z = self.model.decode_image(z_latent)
 

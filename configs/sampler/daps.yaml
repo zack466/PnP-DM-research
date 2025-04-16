@@ -11,5 +11,7 @@ sample_num_iters: 30
 sample_learning_rate: 1e-4
 sample_momentum: 0.45
 
+skip_noising: false
+
 num_burn_in_iters: 40
 num_samples_per_run: 20

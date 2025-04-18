@@ -11,9 +11,12 @@ from pnpdm.samplers import get_sampler
 from hydra.core.hydra_config import HydraConfig
 from monai.metrics import PSNRMetric, SSIMMetric
 from taming.modules.losses.lpips import LPIPS
+import wandb
+from omegaconf import OmegaConf
 
 @hydra.main(version_base="1.2", config_path="configs", config_name="default")
 def posterior_sample(cfg):
+    
     # load configurations
     data_config = cfg.data
     task_config = cfg.task
@@ -73,6 +76,18 @@ def posterior_sample(cfg):
         'ssim': SSIMMetric(spatial_dims=2),
         'lpips': LPIPS().to(device).eval(),
     }
+    psnr_vals = []
+    utilize_wandb = True 
+    project_name="DCDP_tests"
+    exp_name = exp_name
+    if utilize_wandb:
+        wandb.init(
+            project=project_name,
+            name=exp_name,
+            config=OmegaConf.to_container(cfg, resolve=True)
+        )
+    #name takes the output directory
+        
     for i, (ref_img, prompt) in enumerate(zip(dataloader, prompts)):
         logger.info(f"Inference for image {i} on device {device_str}")
         file_idx = f"{i:05d}"
@@ -143,6 +158,10 @@ def posterior_sample(cfg):
                 log["consistency_mean"].append(torch.norm(operator.forward(transform(mean)) - y_n).item())
                 plt.imsave(os.path.join(out_path, 'recon', file_idx+f'_run_{j}_mean.png'), log["means"][-1], cmap=cmap)
                 # plt.imsave(os.path.join(out_path, 'recon', file_idx+f'_run_{j}_std.png'), log["stds"][-1], cmap=cmap)
+            psnr_vals.append(log["psnr_sample"][-1])
+        
+
+
 
         with open(os.path.join(out_path, "prompts.txt"), "a") as f:
             f.write(f"{file_idx} -- \"{prompt}\"\n")
@@ -179,6 +198,12 @@ def posterior_sample(cfg):
             f.write('\n')
             f.write(f'consistency (gt): {log["consistency_gt"]}\n')
             f.close()
+
+        avg_psnr_val = np.average(np.array(psnr_vals))
+        print(f"Average PSNR Val: {avg_psnr_val}")
+        name="super_res_16x"
+        wandb_metric = {"psnr" : float(avg_psnr_val)}
+        wandb.log(wandb_metric)
 
         # meta logging
         meta_log["consistency_gt"].append(log["consistency_gt"])

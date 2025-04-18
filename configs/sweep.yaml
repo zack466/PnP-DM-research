@@ -1,0 +1,33 @@
+program: posterior_sample.py
+method: bayes
+metric:
+  goal: maximize
+  name: psnr
+
+parameters:
+  sampler.sample_num_iters:
+    min: 10
+    max: 50
+
+  sampler.sample_learning_rate:
+    distribution: uniform
+    min: 1e-5
+    max: 1e-1
+
+
+  sampler.sample_momentum:
+    distribution: uniform
+    min: 0.6
+    max: 0.99
+  
+
+
+command:
+  - ${env}
+  - python3 
+  - ${program} 
+  - +data=images_with_prompts 
+  - +task=gaussian_deblur_circ
+  - +model=daps_sd_wrapper 
+  - +sampler=dcdp 
+  - ${args_no_hyphens}

@@ -58,6 +58,14 @@ class UnifiedLatent:
         if not hasattr(self.model, "set_prompt"):
             logging.warning("the model for this sampler has no `set_prompt` function")
 
+        self.likelihood_space = "latent"
+        if self.likelihood_space == "latent":
+            self.loss = self.latent_loss
+        elif self.likelihood_space == "image":
+            self.loss = self.image_loss
+        else:
+            raise ValueError("likelihood_space should be either latent or image")
+
     def get_rho_schedule(self, num_iters):
         max_allowed = self.model.get_sigma(0)
         min_allowed = self.model.get_sigma(self.model.num_steps - 1)
@@ -104,8 +112,16 @@ class UnifiedLatent:
     def display_name(self):
         return f'{self.config.method}__{self.config.schedule}_schedule__{self.model.__class__.__name__}'
 
-    def loss(self, pred, observation):
+    # latent space
+    def latent_loss(self, pred, observation):
+        assert pred.shape == (1,4,64,64)
         decoded = self.model.decode_image(pred).float()
+        return ((self.operator.forward(decoded) - observation) ** 2).flatten(1).sum(-1)
+
+    # image space
+    def image_loss(self, pred, observation):
+        assert pred.shape == (1,3,512,512)
+        decoded = pred.float()
         return ((self.operator.forward(decoded) - observation) ** 2).flatten(1).sum(-1)
 
     def get_grad(self, pred, observation):
@@ -211,8 +227,14 @@ class UnifiedLatent:
             save_latent(x_latent, f"prior_latent{i:03}.png")
 
             # likelihood step (langevin dynamics)
-            z_latent = likelihood_sampler(x_latent, y_n, self.noiser.sigma, rho)
-            z0 = self.model.decode_image(z_latent)
+            if self.likelihood_space == "latent":
+                z_latent = likelihood_sampler(x_latent, y_n, self.noiser.sigma, rho)
+                z0 = self.model.decode_image(z_latent)
+            elif self.likelihood_space == "image":
+                z0 = likelihood_sampler(x, y_n, self.noiser.sigma, rho)
+                z_latent = self.model.encode_image(z0)
+            else:
+                raise ValueError("likelihood_space should be latent or image")
             save_latent(z_latent, f"likelihood_before_noise{i:03}.png")
 
             # add noise (forward diffusion)

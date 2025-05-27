@@ -34,6 +34,12 @@ def save_grid(images, target='image.png', nrow=10, normalize=True):
         images = norm_image_01(images)
     save_image(images, target, nrow=nrow)
 
+def save_latent(latent, target='image.png'):
+    latent_saves = latent.transpose(0,1)
+    latent_saves = torch.cat([latent_saves, latent_saves, latent_saves], dim=1)
+    save_grid(latent_saves, target)
+
+
 class UnifiedLatent:
     """
     Run our latent version of PnP-DM. This is very similar to the original
@@ -202,10 +208,12 @@ class UnifiedLatent:
             # prior step (reverse diffusion)
             x_latent = self.model.sample(z_latent, starting_sigma=rho)
             x = self.model.decode_image(x_latent)
+            save_latent(x_latent, f"prior_latent{i:03}.png")
 
             # likelihood step (langevin dynamics)
             z_latent = likelihood_sampler(x_latent, y_n, self.noiser.sigma, rho)
             z0 = self.model.decode_image(z_latent)
+            save_latent(z_latent, f"likelihood_before_noise{i:03}.png")
 
             # add noise (forward diffusion)
             if i != len(rho_values)-1 and not self.config.skip_noising:

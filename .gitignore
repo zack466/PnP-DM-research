@@ -8,6 +8,5 @@ results*
 old_results/
 *.pyc
 wandb/
-full_final_images/
 images/
 models/

@@ -1,0 +1,78 @@
+[
+    {
+        "image": "0104.png",
+        "prompt": "two scoops of ice cream with a cannoli"
+    },
+    {
+        "image": "0130.png",
+        "prompt": "two teenagers sitting on a fence"
+    },
+    {
+        "image": "0160.png",
+        "prompt": "mother snow leopard with its child"
+    },
+    {
+        "image": "0295.png",
+        "prompt": "a black and orange butterfly"
+    },
+    {
+        "image": "0304.png",
+        "prompt": "an old red sports ferrari car"
+    },
+    {
+        "image": "0365.png",
+        "prompt": "a cat flexing its muscles"
+    },
+    {
+        "image": "0386.png",
+        "prompt": "a fox resting on top of a wall"
+    },
+    {
+        "image": "0524.png",
+        "prompt": "two hippos in the water from the side"
+    },
+    { "image": "1401.JPEG", "prompt": "A dog with people in the background." },
+    { "image": "82.JPEG", "prompt": "A woman with red hair and a dog." },
+    { "image": "891.JPEG", "prompt": "A stack of pretzels." },
+    {"image": "ILSVRC2012_val_00002079.JPEG", "prompt" : "An image of a dog laying on the grass."},
+    {"image": "1523.JPEG", "prompt" : "Sliced bread on a cutting board."},
+    {"image": "ILSVRC2012_val_00034044.JPEG", "prompt" : "A plate of sliced cucumbers on top of tomatoes. A green onion lies on top."},
+    {
+        "image": "0104.png",
+        "prompt": "a plate of macarons"
+    },
+    {
+        "image": "0130.png",
+        "prompt": "two birds on a fence"
+    },
+    {
+        "image": "0160.png",
+        "prompt": "a dog sitting on the grass"
+    },
+    {
+        "image": "0295.png",
+        "prompt": "a black and orange flower"
+    },
+    {
+        "image": "0304.png",
+        "prompt": "a red Tesla car"
+    },
+    {
+        "image": "0365.png",
+        "prompt": "a gray tiger flexing his muscles"
+    },
+    {
+        "image": "0386.png",
+        "prompt": "a squirrel lying down"
+    },
+    {
+        "image": "0524.png",
+        "prompt": "rocks coming out of the water"
+    },
+    { "image": "1401.JPEG", "prompt": "A hyena in the wild." },
+    { "image": "82.JPEG", "prompt": "A gorilla with a human in the background." },
+    { "image": "891.JPEG", "prompt": "A stack of hamburgers." },
+    {"image": "ILSVRC2012_val_00002079.JPEG", "prompt" : "An image of a cat laying on the grass."},
+    {"image": "ILSVRC2012_val_00034044.JPEG", "prompt" : "A bowl of pasta with green sauce."},
+    {"image": "1523.JPEG", "prompt" : "Meatloaf on a cutting board."}
+]
